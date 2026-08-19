@@ -1,5 +1,5 @@
 SWIFTC := swiftc -O
-TOOLS  := caps sig adev
+TOOLS  := caps sig adev probe
 
 all: $(addprefix bin/,$(TOOLS))
 

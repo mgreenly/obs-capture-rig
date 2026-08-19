@@ -53,6 +53,14 @@ PROFILE_INI = {
     "Audio": {"SampleRate": 48000, "ChannelSetup": "Stereo"},
 }
 
+# profiles/<name>/recordEncoder.json
+#
+# OBS serialises ONLY values that differ from the encoder's defaults, which is
+# why rate_control and profile are absent: CBR and "main" are already the
+# Apple VT HEVC defaults. Setting them explicitly here would be guesswork about
+# key names, so we write exactly what OBS itself wrote.
+ENCODER_JSON = {"bitrate": 100000, "keyint_sec": 1}
+
 # device_name -> what each capture source should use
 SOURCE_PRESETS = {
     "Cam Link 4K":   "AVCaptureSessionPreset3840x2160",
@@ -113,6 +121,22 @@ def patch_profile():
             cp.write(f, space_around_delimiters=False)
 
 # ---------------------------------------------------------------- scene
+
+def patch_encoder():
+    print("\n[profile] recordEncoder.json")
+    p = os.path.join(PROFILE, "recordEncoder.json")
+    cur = {}
+    if os.path.exists(p):
+        try:
+            cur = json.load(open(p))
+        except ValueError:
+            pass
+    if cur != ENCODER_JSON:
+        note("encoder settings: %s -> %s" % (cur or "(absent)", ENCODER_JSON))
+        if WRITE:
+            json.dump(ENCODER_JSON, open(p, "w"))
+    return
+
 
 def patch_scene():
     print("\n[scene] Untitled.json")
@@ -196,6 +220,7 @@ def main():
         print("backup -> backups/%s" % stamp)
 
     patch_profile()
+    patch_encoder()
     d = patch_scene()
     if WRITE and d is not None:
         json.dump(d, open(SCENE, "w"), indent=4)
