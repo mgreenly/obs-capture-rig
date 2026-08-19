@@ -4,6 +4,10 @@ Canonical config for the 4K30 YouTube recording setup, plus the tools used to
 verify it. Everything here is reproducible: `./apply.py --write` restores the
 whole OBS config from scratch.
 
+**Full guide:** `notes/rig-guide.html` — open it in a browser. It covers the manual
+camera walkthrough (the fragile part), how to ask Claude to re-apply this setup, and a
+complete record of hardware, settings and scene. This README is the condensed version.
+
 ## Hardware
 
 | Role | Device | Connection |
