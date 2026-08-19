@@ -47,9 +47,11 @@ Cam Link then offers, since it advertises just what it is being fed.
 - File Format XAVC S 4K, Record Setting 30p 100M, Proxy Recording Off
 - 4K Output Select → Memory Card+HDMI
 - HDMI Info. Display → Off, CTRL FOR HDMI → Off (clean feed, no CEC)
+- Power Save Start Time → Off
 
-Still open: Power Save Start Time → Off, Auto Power OFF Temp. → High. Matters
-most in `Memory Card+HDMI` mode, which is the hottest-running option.
+The camera is fully configured. Worth confirming Auto Power OFF Temp. is set to
+High as well — `Memory Card+HDMI` is the hottest-running output mode, and the
+ZV-1 will stop on thermal cutout mid-take otherwise.
 
 ## Tools
 
