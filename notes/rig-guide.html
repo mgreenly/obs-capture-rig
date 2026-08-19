@@ -165,7 +165,7 @@
   <h1>Capture rig: complete setup and recovery guide</h1>
   <p class="lede">Everything needed to rebuild this 4K30 recording setup from nothing —
   the manual camera walkthrough, the scripted OBS side, and a full record of the
-  hardware, settings and scene as they stand.</p>
+  hardware, settings and scenes as they stand.</p>
   <div class="meta">
     <span>github.com/mgreenly/obs-capture-rig</span>
     <span>~/Projects/obs</span>
@@ -179,11 +179,12 @@
   <a class="tocitem" href="#hardware"><span>03</span> Hardware</a>
   <a class="tocitem" href="#caps"><span>04</span> Device capabilities</a>
   <a class="tocitem" href="#obs"><span>05</span> OBS configuration</a>
-  <a class="tocitem" href="#scene"><span>06</span> Scene layout</a>
-  <a class="tocitem" href="#audio"><span>07</span> Audio routing</a>
-  <a class="tocitem" href="#verify"><span>08</span> Verifying</a>
-  <a class="tocitem" href="#trouble"><span>09</span> Troubleshooting</a>
-  <a class="tocitem" href="#files"><span>10</span> File locations</a>
+  <a class="tocitem" href="#scene"><span>06</span> Scenes</a>
+  <a class="tocitem" href="#deck"><span>07</span> Stream Deck</a>
+  <a class="tocitem" href="#audio"><span>08</span> Audio routing</a>
+  <a class="tocitem" href="#verify"><span>09</span> Verifying</a>
+  <a class="tocitem" href="#trouble"><span>10</span> Troubleshooting</a>
+  <a class="tocitem" href="#files"><span>11</span> File locations</a>
 </nav>
 
 <!-- ============================================================ 01 -->
@@ -205,6 +206,13 @@
       collection. Dry-run by default; <code>--write</code> applies. Backs up first, into
       <code>backups/&lt;timestamp&gt;/</code>. Refuses to run while OBS is open, because
       OBS rewrites its config on exit and would silently undo the changes.</div></div></div>
+    <div class="row"><div class="k">bin/level</div><div class="v">
+      <div class="val">./bin/level &lt;file.mov&gt;</div>
+      <div class="why">Peak and RMS dBFS per channel, decoded from the actual samples.
+      <code>bin/probe</code> reports the audio <em>format</em>, which a fully silent track
+      satisfies just as well as a good one — this is what proves a scene captured sound.
+      Comparing RMS against a known-good take also shows whether it came through the same
+      path.</div></div></div>
     <div class="row"><div class="k">make probe</div><div class="v">
       <div class="val">make probe</div>
       <div class="why">Runs all device probes in order. The first thing to reach for when
@@ -624,10 +632,15 @@
       <div class="val">Cam Link 4K · AVCaptureSessionPreset3840x2160</div></div></div>
     <div class="row"><div class="k">HDX 60</div><div class="v">
       <div class="val">Elgato HD60 X · AVCaptureSessionPreset3840x2160</div></div></div>
-    <div class="row"><div class="k">Audio Input Capture</div><div class="v">
+    <div class="row"><div class="k">Wave XLR</div><div class="v">
       <div class="val">Elgato Wave Link Stream Mix</div>
       <div class="why">Resolved by name at apply time. Wave Link's virtual devices use GUIDs
-      that regenerate on reinstall, so a hardcoded UID is a latent breakage.</div></div></div>
+      that regenerate on reinstall, so a hardcoded UID is a latent breakage.
+      <strong>The source name is not the device</strong> — see the note below.</div></div></div>
+    <div class="row"><div class="k">Image</div><div class="v">
+      <div class="val">Unmanaged &mdash; changes every recording</div>
+      <div class="why">The still used by the <code>Thumb</code> scene. apply.py never writes
+      this path; it only warns if the file it points at has gone missing.</div></div></div>
     <div class="row"><div class="k">Global Mic/Aux</div><div class="v">
       <div class="val">removed</div>
       <div class="why">Was <code>default</code>, resolving to the HD60 X — a second live audio
@@ -635,28 +648,103 @@
       the <code>AuxAudioDevice1</code> key is equivalent to setting Disabled;
       confirmed.</div></div></div>
   </div>
+
+  <div class="note">
+    <h3>The source named <em>Wave XLR</em> is not the Wave XLR</h3>
+    <p class="why">It captures <strong>Wave Link Stream Mix</strong> — the mic
+    <em>after</em> Wave Link's processing. The name is the mic sitting on the desk; the device
+    is the finished mix. Do not "correct" it to the literal <code>Elgato Wave XLR</code>
+    interface: that bypasses Wave Link entirely and loses every filter.</p>
+    <p class="why">apply.py matches this source by <em>type</em>
+    (<code>coreaudio_input_capture</code>), never by name, so renaming it in OBS is free. The
+    same is true of every source here — only <em>scene</em> names are load-bearing.</p>
+  </div>
 </section>
 
 <!-- ============================================================ 06 -->
 <section id="scene">
   <div class="sechead">
     <div class="eyebrow">06 &middot; Layout</div>
-    <h2>Scene</h2>
+    <h2>Scenes</h2>
   </div>
+
+  <p class="why">One scene collection, <code>Rig</code>. That is the <strong>collection</strong>
+  name — it is what names <code>scenes/Rig.json</code> — and it is unrelated to the names of
+  the scenes inside it. Renaming a scene does not move that file; renaming the collection
+  does.</p>
+  <p class="why">The <em>profile</em> is separately named <code>Untitled</code>. The two are
+  independent. apply.py reads both from <code>user.ini</code> <code>[Basic]</code> rather than
+  hardcoding paths, and checks the names against <code>PROFILE_NAME</code> and
+  <code>COLLECTION_NAME</code> — patching a collection OBS is not actually loading would look
+  like it worked while changing nothing.</p>
+
+  <h4>Desktop <span class="why" style="font-weight:400">&mdash; the working scene</span></h4>
   <div class="tblwrap">
     <table>
       <thead><tr><th>Item</th><th class="mono">Position</th><th class="mono">Scale</th>
         <th class="mono">On canvas</th><th>Role</th></tr></thead>
       <tbody>
         <tr><td class="mono">HDX 60</td><td class="mono">0, 0</td><td class="mono">1.000</td>
-          <td class="mono">3840 × 2160</td><td>Full-frame background</td></tr>
+          <td class="mono">3840 &times; 2160</td><td>Full-frame background</td></tr>
         <tr><td class="mono">Sony ZV1</td><td class="mono">1972, 0</td><td class="mono">0.4865</td>
           <td class="mono">1868 wide</td><td>Camera PiP, flush right</td></tr>
-        <tr><td class="mono">Audio Input Capture</td><td class="mono">0, 0</td>
-          <td class="mono">1.000</td><td class="mono">—</td><td>Audio only</td></tr>
+        <tr><td class="mono">Wave XLR</td><td class="mono">0, 0</td>
+          <td class="mono">1.000</td><td class="mono">&mdash;</td><td>Audio only</td></tr>
       </tbody>
     </table>
   </div>
+
+  <h4>BigHead <span class="why" style="font-weight:400">&mdash; talking head, camera only</span></h4>
+  <div class="tblwrap">
+    <table>
+      <thead><tr><th>Item</th><th class="mono">Position</th><th class="mono">Scale</th>
+        <th class="mono">On canvas</th><th>Role</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">Sony ZV1</td><td class="mono">0, 0</td><td class="mono">1.000</td>
+          <td class="mono">3840 &times; 2160</td><td>Full-frame camera</td></tr>
+        <tr><td class="mono">Wave XLR</td><td class="mono">0, 0</td>
+          <td class="mono">1.000</td><td class="mono">&mdash;</td><td>Audio only</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note">
+    <h3>Every scene that should have sound needs its own audio item</h3>
+    <p class="why">An audio source is live <em>only</em> in the scenes that contain it, and the
+    global Mic/Aux slot is deliberately empty — it was a second live audio path and the cause
+    of the launch hang. Nothing else carries audio into a scene.</p>
+    <p class="why"><code>BigHead</code> recorded silence until its <code>Wave XLR</code> item
+    was added. <code>Thumb</code> is silent on purpose. When adding audio to a new scene use
+    the <em>existing</em> source (Add &rarr; Audio Input Capture &rarr; <em>Add Existing</em>),
+    never a new capture — a second capture of the same device is a separate source with its own
+    settings and monitoring state.</p>
+    <p class="why">The OBS log is the check that settles it:</p>
+    <pre><code>- scene 'BigHead':
+    - source: 'Wave XLR' (coreaudio_input_capture)
+    - source: 'Sony ZV1' (macos-avcapture)</code></pre>
+  </div>
+
+  <h4>Thumb <span class="why" style="font-weight:400">&mdash; thumbnail still</span></h4>
+  <div class="tblwrap">
+    <table>
+      <thead><tr><th>Item</th><th class="mono">Position</th><th class="mono">Scale</th>
+        <th class="mono">On canvas</th><th>Role</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">Image</td><td class="mono">0, 0</td><td class="mono">1.000</td>
+          <td class="mono">fills canvas</td><td>Swapped per recording; no audio</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <h3>Sony ZV1 and Wave XLR are shared, not copied</h3>
+    <p class="why">Both scenes reference the <em>same</em> camera capture and the
+    <em>same</em> audio capture — identical <code>source_uuid</code>, listed twice.
+    Changing a source's settings changes it in every scene at
+    once, which is what makes apply.py's per-source patching safe. It also means the camera has
+    <strong>two different roles</strong>: a PiP in <code>Desktop</code>, full-frame in
+    <code>BigHead</code>.</p>
+  </div>
+
   <div class="note">
     <h3>Scale is relative to source pixels</h3>
     <p class="why">A scene item's scale multiplies its source resolution, so changing a capture
@@ -664,16 +752,100 @@
     compensate. apply.py handles this: when a source's preset resolution changes it rescales
     dependent items by the inverse ratio, preserving on-screen layout. Because the preset
     changes only once, re-running is idempotent — it will not keep shrinking the PiP.</p>
+    <p class="why">Inverse scaling is only correct for an item whose <em>on-screen size</em>
+    should be preserved. A full-frame item should follow the new resolution instead, so
+    <code>FULLSCREEN_ITEMS</code> in apply.py lists the items that snap to scale 1.0:
+    <code>Desktop/HDX 60</code>, <code>BigHead/Sony ZV1</code>, <code>Thumb/Image</code>. That
+    list is keyed on <strong>(scene, item)</strong>, not on the source — Sony ZV1 needs
+    opposite treatment in its two scenes.</p>
     <p class="why">This also means <strong>apply.py leaves your manual layout tweaks
     alone</strong>. Resize the PiP in OBS whenever you like; the script only touches scale when
     a resolution actually changes underneath it.</p>
   </div>
+
+  <div class="note">
+    <h3>Renaming a scene stops apply.py</h3>
+    <p class="why">Source names are free — apply.py matches sources by type. Scene names are
+    not: <code>FULLSCREEN_ITEMS</code> is keyed on them. apply.py checks the scene list against
+    <code>SCENES</code> up front and exits rather than apply a stale layout silently. If you
+    rename or add a scene, update <code>SCENES</code> and <code>FULLSCREEN_ITEMS</code> in
+    apply.py and the tables above.</p>
+  </div>
 </section>
 
 <!-- ============================================================ 07 -->
+<section id="deck">
+  <div class="sechead">
+    <div class="eyebrow">07 &middot; Control surface</div>
+    <h2>Stream Deck</h2>
+  </div>
+  <p class="why">Stream Deck Mini — 6 keys, 3 columns &times; 2 rows. Key coordinates in the
+  profile JSON are <code>column,row</code>.</p>
+  <div class="tblwrap">
+    <table>
+      <thead><tr><th></th><th class="mono">col 0</th><th class="mono">col 1</th>
+        <th class="mono">col 2</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">row 0</td><td class="mono">Desktop</td><td class="mono">Thumb</td>
+          <td class="mono">BigHead</td></tr>
+        <tr><td class="mono">row 1</td><td class="mono">Record toggle</td><td>&mdash;</td>
+          <td class="mono">Next page</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <h3>Two plugins, one on each side</h3>
+    <p class="why">The scene keys light up when their scene is live and the record key shows
+    OBS's <em>real</em> recording state. That feedback is the whole reason to use the plugin
+    rather than system hotkeys, which are fire-and-forget — after one missed press a hotkey
+    "toggle" lies to you about whether you are recording.</p>
+    <p class="why">It needs both halves installed:</p>
+    <div class="settings">
+      <div class="row"><div class="k">Stream Deck side</div><div class="v">
+        <div class="val mono">com.elgato.obsstudio.sdPlugin</div>
+        <div class="why">In the Stream Deck app's <code>Plugins/</code>. From the Elgato
+        Marketplace.</div></div></div>
+      <div class="row"><div class="k">OBS side</div><div class="v">
+        <div class="val mono">StreamDeckPlugin.plugin</div>
+        <div class="why">In <code>~/Library/Application Support/obs-studio/plugins/</code>,
+        placed by the Elgato installer. Ships per-OBS-version variants;
+        <code>StreamDeckPluginOBS32</code> matches OBS 32.</div></div></div>
+    </div>
+    <p class="why">They speak a private <code>streamdeck-obs</code> protocol on
+    <code>127.0.0.1:28186</code> — <strong>not obs-websocket</strong>, which stays disabled and
+    needs no password. Confirm the bridge in the OBS log:</p>
+    <pre><code>&lt;StreamDeck&gt; Plugin version 5.5.4.2
+&lt;StreamDeck&gt; [Server] Listening on '127.0.0.1:28186'.</code></pre>
+  </div>
+
+  <div class="note">
+    <h3>Keys bind scenes by name</h3>
+    <p class="why">A scene key's settings are just
+    <code>{"scene": "Desktop", "target": "program"}</code>. Rename a scene in OBS and its key
+    silently stops matching — the same fragility that makes apply.py halt on scene drift.
+    Rename in both places, or not at all.</p>
+    <p class="why">The record key takes <code>{"longpress": false}</code>. Set it
+    <code>true</code> to require a 3-second hold, which is worth considering if you ever stop a
+    take by accident.</p>
+  </div>
+
+  <div class="note">
+    <h3>Quit Stream Deck before editing the profile</h3>
+    <p class="why">Same hazard as OBS: the app rewrites its config on exit and will silently
+    undo hand edits. The profile lives at</p>
+    <pre><code>~/Library/Application Support/com.elgato.StreamDeck/ProfilesV3/
+  &lt;device&gt;.sdProfile/Profiles/&lt;page&gt;/manifest.json</code></pre>
+    <p class="why">Quit the app, edit, relaunch. A good sign the edit took: the plugin adds its
+    own keys (e.g. <code>isInMultiAction</code>) to your action settings on load, which means
+    the action resolved rather than merely parsing as JSON.</p>
+  </div>
+</section>
+
+<!-- ============================================================ 08 -->
 <section id="audio">
   <div class="sechead">
-    <div class="eyebrow">07 &middot; Division of labor</div>
+    <div class="eyebrow">08 &middot; Division of labor</div>
     <h2>Audio routing</h2>
   </div>
   <p class="why"><strong>Wave Link owns everything you hear and every filter applied.</strong>
@@ -694,6 +866,10 @@
       <div class="why">Intentionally irrelevant: nothing monitors, so this setting never comes
       into play. Left alone rather than set, to avoid implying monitoring is
       expected.</div></div></div>
+    <div class="row"><div class="k">Gain staging</div><div class="v">
+      <div class="val">Peaks -12 to -6 dBFS</div>
+      <div class="why">Set at the Wave XLR's analog knob. Verify with
+      <code>./bin/level</code> on a real take — see section 09.</div></div></div>
     <div class="row"><div class="k">Sample rate / channels</div><div class="v">
       <div class="val">48 kHz · Stereo</div>
       <div class="why">Matches Wave Link. A mismatch forces resampling and can drift over a
@@ -708,17 +884,22 @@
   </div>
 </section>
 
-<!-- ============================================================ 08 -->
+<!-- ============================================================ 09 -->
 <section id="verify">
   <div class="sechead">
-    <div class="eyebrow">08 &middot; Proof, not intent</div>
+    <div class="eyebrow">09 &middot; Proof, not intent</div>
     <h2>Verifying</h2>
   </div>
   <p class="why">Config files and startup logs prove what OBS was <em>told</em> to do. Only
   reading back a finished recording proves what happened.</p>
   <pre><code>cd ~/Projects/obs
 make probe                                  # devices
-./bin/probe ~/Movies/&lt;newest&gt;.mov           # the recording</code></pre>
+./bin/probe ~/Movies/&lt;newest&gt;.mov           # the recording
+./bin/level ~/Movies/&lt;newest&gt;.mov           # audio levels on disk</code></pre>
+  <p class="why"><code>probe</code> and <code>level</code> answer different questions.
+  <code>probe</code> reports the audio <em>format</em> — which a completely silent track
+  satisfies exactly as well as a good one. <code>level</code> decodes the samples. Only the
+  second one can tell you a scene captured sound.</p>
 
   <h4>Reference result — 13 s test recording</h4>
   <pre><code>VIDEO  3840x2160  29.970 fps  codec hvc1
@@ -737,6 +918,30 @@ Number of lagged frames due to rendering lag/stalls: 1 (0.2%)</code></pre>
   <strong>Stats dock</strong> (View → Docks → Stats) during long takes — rendering lag is the
   one failure mode that never shows up in the output file.</p>
 
+  <h4 style="margin-top:.4rem">Reference result — audio levels</h4>
+  <pre><code>        peak dBFS   RMS dBFS
+  ch0     -9.3       -30.3
+  ch1     -9.3       -30.3</code></pre>
+  <p class="why">Both channels identical, because the Wave XLR is a mono mic duplicated to
+  stereo by Wave Link. Aim for peaks between <strong>-12 and -6 dBFS</strong>. Comparing RMS
+  against a known-good take is also how you confirm a new scene is carrying audio through the
+  <em>same</em> path rather than some other device.</p>
+
+  <div class="note">
+    <h3>Set gain for headroom, not for level</h3>
+    <p class="why">Recording is lossless 24-bit PCM, whose noise floor sits far below anything
+    this mic and preamp produce. Recording quieter therefore costs nothing — lifting it in post
+    is free. Clipping is the one error that cannot be undone, so headroom is the only thing
+    worth optimising for.</p>
+    <p class="why">An early take here peaked at <strong>-2.8 dBFS</strong>, under 3 dB of
+    headroom. Dropping the gain ~6 dB moved it to -9.3. Note the peak fell 6.5 dB while RMS
+    fell only 3.7 — the original peak was a transient, not the speaking level.</p>
+    <p class="why">Adjust the <strong>Wave XLR's analog gain knob</strong>, not the Wave Link
+    fader. The knob is the preamp ahead of the converter; a digital fader after the A/D only
+    makes an already-clipped signal quieter. That the peak moved with the knob is the proof the
+    ceiling was analog. Clipguard is a backstop, not a substitute for correct gain.</p>
+  </div>
+
   <div class="note">
     <h3>Storage</h3>
     <p class="why">Roughly 45 GB/hour at 100 Mbps. With ~842 GB free that is about 18 hours of
@@ -744,10 +949,10 @@ Number of lagged frames due to rendering lag/stalls: 1 (0.2%)</code></pre>
   </div>
 </section>
 
-<!-- ============================================================ 09 -->
+<!-- ============================================================ 10 -->
 <section id="trouble">
   <div class="sechead">
-    <div class="eyebrow">09 &middot; Known failure modes</div>
+    <div class="eyebrow">10 &middot; Known failure modes</div>
     <h2>Troubleshooting</h2>
   </div>
 
@@ -768,12 +973,38 @@ Number of lagged frames due to rendering lag/stalls: 1 (0.2%)</code></pre>
       <div class="why">It rewrites everything on exit. Quit first, always.</div></div></div>
     <div class="row"><div class="k">Audio sounds unprocessed</div><div class="v">
       <div class="val">Source pointed past Wave Link</div>
-      <div class="why">Confirm the OBS input is <em>Wave Link Stream Mix</em>, not
-      <em>Wave XLR</em>. Run <code>./bin/adev</code> and re-apply.</div></div></div>
+      <div class="why">The source is <em>named</em> <code>Wave XLR</code>; check the device it
+      actually holds. It must be <em>Elgato Wave Link Stream Mix</em>, not the
+      <em>Elgato Wave XLR</em> interface — the latter bypasses all filtering. Run
+      <code>./bin/adev</code> and re-apply.</div></div></div>
+    <div class="row"><div class="k">apply.py: "active config is profile X / collection Y"</div><div class="v">
+      <div class="val">OBS switched profile or collection</div>
+      <div class="why">apply.py refuses to patch files OBS is not loading. Switch back in OBS
+      (Profile / Scene Collection menus), or update <code>PROFILE_NAME</code> /
+      <code>COLLECTION_NAME</code> in apply.py.</div></div></div>
+    <div class="row"><div class="k">apply.py: "scene layout drifted"</div><div class="v">
+      <div class="val">A scene was renamed or added</div>
+      <div class="why">Deliberate: <code>FULLSCREEN_ITEMS</code> is keyed on scene names, so a
+      rename it does not know about would apply a stale layout. Update <code>SCENES</code> and
+      <code>FULLSCREEN_ITEMS</code> in apply.py and section 06, then re-run.</div></div></div>
+    <div class="row"><div class="k">Thumb scene is blank</div><div class="v">
+      <div class="val">Image file moved or deleted</div>
+      <div class="why">The still is swapped per recording and is not managed by apply.py — a
+      dry-run prints <code>references a missing file</code>. Point the
+      <code>Image</code> source at the new file in OBS.</div></div></div>
     <div class="row"><div class="k">Doubled / echoing audio</div><div class="v">
       <div class="val">OBS monitoring is on</div>
       <div class="why">Every source must be Monitor Off; Wave Link's Monitor Mix already feeds
       the headphones.</div></div></div>
+    <div class="row"><div class="k">Audio clipped / distorted</div><div class="v">
+      <div class="val">Gain too hot at the preamp</div>
+      <div class="why">Run <code>./bin/level</code>; peaks near 0 dBFS confirm it. Turn the Wave
+      XLR's analog knob down, not the Wave Link fader — see section 09.</div></div></div>
+    <div class="row"><div class="k">A scene records no audio</div><div class="v">
+      <div class="val">No audio item in that scene</div>
+      <div class="why">Audio sources are live only in scenes that contain them, and the global
+      Mic/Aux slot is deliberately empty. Check the OBS log's <em>Loaded scenes</em> block —
+      it lists every source per scene. See section 06.</div></div></div>
     <div class="row"><div class="k">Wave Link device not found</div><div class="v">
       <div class="val">GUID regenerated</div>
       <div class="why">Reinstalling Wave Link mints new virtual-device GUIDs. apply.py resolves
@@ -786,14 +1017,16 @@ Number of lagged frames due to rendering lag/stalls: 1 (0.2%)</code></pre>
     <div class="row"><div class="k">Hotkeys dead in background</div><div class="v">
       <div class="val">Input Monitoring permission</div>
       <div class="why">System Settings → Privacy &amp; Security → Input Monitoring → enable
-      OBS. Currently denied.</div></div></div>
+      OBS. Currently denied. This does <em>not</em> affect the Stream Deck, which drives OBS
+      through its own plugin rather than hotkeys — it only matters for keyboard hotkeys while
+      OBS is backgrounded.</div></div></div>
   </div>
 </section>
 
-<!-- ============================================================ 10 -->
+<!-- ============================================================ 11 -->
 <section id="files">
   <div class="sechead">
-    <div class="eyebrow">10 &middot; Reference</div>
+    <div class="eyebrow">11 &middot; Reference</div>
     <h2>File locations</h2>
   </div>
   <pre><code>~/Projects/obs/                       git repo, source of truth
@@ -806,9 +1039,11 @@ Number of lagged frames due to rendering lag/stalls: 1 (0.2%)</code></pre>
   backups/&lt;timestamp&gt;/                pre-apply snapshots (gitignored)
 
 ~/Library/Application Support/obs-studio/
+  user.ini                                      [Basic] names the ACTIVE profile
+                                                and scene collection
   basic/profiles/Untitled/basic.ini             video, output, audio settings
   basic/profiles/Untitled/recordEncoder.json    encoder bitrate + keyframe
-  basic/scenes/Untitled.json                    sources, scene items, globals
+  basic/scenes/Rig.json                         collection: sources, 3 scenes, globals
   logs/                                         startup + recording logs
 
 ~/Movies/                             recordings</code></pre>

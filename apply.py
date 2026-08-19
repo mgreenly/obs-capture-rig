@@ -9,23 +9,61 @@ and would clobber whatever we wrote.
 Design notes:
   * The scene collection is PATCHED, not replaced. Scene items reference
     sources by UUID; regenerating the file would break those links.
+  * The profile and collection PATHS are read from OBS's user.ini, not
+    hardcoded, and their names are checked. Patching a collection OBS is not
+    actually using would silently do nothing.
   * Audio devices are resolved BY NAME at apply time. Wave Link's virtual
     devices use GUIDs that regenerate on reinstall, so a hardcoded UID is
     a latent breakage.
   * When a source's capture preset changes resolution, scene items using it
     are rescaled by the inverse ratio so their ON-SCREEN size is preserved.
-    Naturally idempotent: the preset only changes once.
+    Naturally idempotent: the preset only changes once. Items listed in
+    FULLSCREEN_ITEMS are reset to 1.0 instead - a full-frame item should
+    follow the new resolution, not resist it.
+  * One source can appear in several scenes in different roles (Sony ZV1 is a
+    PiP in Desktop and full-frame in BigHead), so scene-item policy is keyed on
+    (scene, item), never on the source name alone.
 """
 import configparser, json, os, shutil, subprocess, sys, time
 
 HOME     = os.path.expanduser("~")
-OBS      = os.path.join(HOME, "Library/Application Support/obs-studio/basic")
-PROFILE  = os.path.join(OBS, "profiles/Untitled")
-SCENE    = os.path.join(OBS, "scenes/Untitled.json")
+OBSROOT  = os.path.join(HOME, "Library/Application Support/obs-studio")
+OBS      = os.path.join(OBSROOT, "basic")
+USER_INI = os.path.join(OBSROOT, "user.ini")
 PROJ     = os.path.dirname(os.path.abspath(__file__))
 BACKUPS  = os.path.join(PROJ, "backups")
 
 WRITE    = "--write" in sys.argv
+
+# The profile and scene collection this config belongs to. Their paths are NOT
+# hardcoded: OBS records the ACTIVE ones in user.ini [Basic], and patching an
+# inactive collection would look like it succeeded while changing nothing OBS
+# will ever load. So resolve, then assert the names match what we expect.
+PROFILE_NAME    = "Untitled"
+COLLECTION_NAME = "Rig"
+
+
+def active_paths():
+    cp = configparser.ConfigParser(interpolation=None)
+    cp.optionxform = str
+    if not cp.read(USER_INI):
+        sys.exit("cannot read %s - is OBS installed and has it run once?" % USER_INI)
+    prof = cp.get("Basic", "ProfileDir",          fallback=None)
+    coll = cp.get("Basic", "SceneCollection",     fallback=None)
+    file = cp.get("Basic", "SceneCollectionFile", fallback=None)
+    if not (prof and coll and file):
+        sys.exit("user.ini [Basic] is missing ProfileDir/SceneCollection entries")
+    if not file.endswith(".json"):        # OBS < 31 stored the stem, not the file
+        file += ".json"
+    if (prof, coll) != (PROFILE_NAME, COLLECTION_NAME):
+        sys.exit("OBS's active config is profile %r / collection %r, but this repo\n"
+                 "describes profile %r / collection %r. Switch OBS back, or update\n"
+                 "PROFILE_NAME / COLLECTION_NAME in apply.py."
+                 % (prof, coll, PROFILE_NAME, COLLECTION_NAME))
+    return os.path.join(OBS, "profiles", prof), os.path.join(OBS, "scenes", file)
+
+
+PROFILE, SCENE = active_paths()
 
 # ---------------------------------------------------------------- target state
 
@@ -68,6 +106,31 @@ SOURCE_PRESETS = {
 }
 
 AUDIO_SOURCE_DEVICE = "Elgato Wave Link Stream Mix"   # resolved by name
+
+# NOTE: the OBS source carrying this device is NAMED "Wave XLR", which is not
+# what it is. It captures Wave Link's Stream Mix, i.e. the mic AFTER Wave Link's
+# processing. The name is the mic on the desk; the device is the mix. apply.py
+# matches on source id, not name, so the label is free to say whatever is
+# convenient -- but do not "fix" the device to the literal Wave XLR interface.
+
+# Scenes inside the collection. COLLECTION_NAME above is the collection (the
+# file it names); these are the scenes within it.
+SCENES = ("Desktop", "Thumb", "BigHead")
+
+# Scene items that must FILL the canvas. When their source's capture resolution
+# changes, these reset to scale 1.0 instead of being inverse-scaled -- inverse
+# scaling is only right for an item whose on-screen size should be preserved,
+# like a PiP. Sony ZV1 is a PiP in Desktop and full-frame in BigHead, so this
+# has to be keyed on (scene, item) rather than on the source.
+FULLSCREEN_ITEMS = {
+    ("Desktop", "HDX 60"),
+    ("BigHead", "Sony ZV1"),
+    ("Thumb",   "Image"),
+}
+
+# Sources apply.py deliberately leaves alone. Thumb's image is swapped by hand
+# for every recording, so its file path is transient by design.
+UNMANAGED_SOURCE_IDS = ("image_source",)
 
 
 def preset_w(p):
@@ -138,9 +201,26 @@ def patch_encoder():
     return
 
 
+def check_layout(d):
+    """Fail early if the scenes were renamed out from under us.
+
+    Nothing below matches on a scene name, so a rename is survivable at runtime --
+    but a rename we do not know about means FULLSCREEN_ITEMS and the docs are
+    stale, and silently applying a stale layout is the worst outcome.
+    """
+    scenes = {s["name"] for s in d.get("sources", []) if s.get("id") == "scene"}
+    missing = sorted(set(SCENES) - scenes)
+    extra   = sorted(scenes - set(SCENES))
+    if missing or extra:
+        sys.exit("scene layout drifted: missing %s, unexpected %s\n"
+                 "Update SCENES / FULLSCREEN_ITEMS in apply.py and notes/rig-guide.html."
+                 % (missing or "none", extra or "none"))
+
+
 def patch_scene():
-    print("\n[scene] Untitled.json")
+    print("\n[scene] %s" % os.path.basename(SCENE))
     d = json.load(open(SCENE))
+    check_layout(d)
 
     uid = resolve_audio_uid(AUDIO_SOURCE_DEVICE)
     if not uid:
@@ -168,6 +248,11 @@ def patch_scene():
                 if WRITE:
                     st["device_id"] = uid
 
+        if s.get("id") in UNMANAGED_SOURCE_IDS:
+            f = st.get("file")
+            if f and not os.path.exists(f):
+                print("  !! source %r references a missing file: %s" % (s["name"], f))
+
         if s.get("monitoring_type", 0) != 0:
             note("source %r monitoring -> Monitor Off" % s["name"])
             if WRITE:
@@ -184,19 +269,24 @@ def patch_scene():
     for s in d.get("sources", []):
         if s.get("id") != "scene":
             continue
+        scene = s["name"]
         for it in s.get("settings", {}).get("items", []):
             got = rescale.get(it.get("name"))
             if not got:
                 continue
             r, new_w = got
             if it.get("bounds_type", 0) != 0:
-                print("  .. %r uses bounds; scale left alone" % it["name"])
+                print("  .. %s/%r uses bounds; scale left alone" % (scene, it["name"]))
                 continue
             sc = it.get("scale", {})
-            nx, ny = round(sc.get("x", 1) * r, 6), round(sc.get("y", 1) * r, 6)
-            onscreen = nx * new_w
-            note("item %r scale: %.4f -> %.4f  (holds %dpx wide on canvas)"
-                 % (it["name"], sc.get("x", 1), nx, round(onscreen)))
+            if (scene, it["name"]) in FULLSCREEN_ITEMS:
+                nx = ny = 1.0            # fills the canvas at any source resolution
+            else:
+                nx, ny = round(sc.get("x", 1) * r, 6), round(sc.get("y", 1) * r, 6)
+            if (sc.get("x"), sc.get("y")) == (nx, ny):
+                continue
+            note("item %s/%r scale: %.4f -> %.4f  (holds %dpx wide on canvas)"
+                 % (scene, it["name"], sc.get("x", 1), nx, round(nx * new_w)))
             if WRITE:
                 sc["x"], sc["y"] = nx, ny
     return d
@@ -216,7 +306,7 @@ def main():
         dest  = os.path.join(BACKUPS, stamp)
         os.makedirs(dest, exist_ok=True)
         shutil.copytree(PROFILE, os.path.join(dest, "profile"))
-        shutil.copy2(SCENE, os.path.join(dest, "Untitled.json"))
+        shutil.copy2(SCENE, os.path.join(dest, os.path.basename(SCENE)))
         print("backup -> backups/%s" % stamp)
 
     patch_profile()
