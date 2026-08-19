@@ -123,6 +123,10 @@ type, not name, so the label is free to say whatever is convenient.
   actually capture sound", and comparing RMS against a known-good take confirms
   it came through the same path.
 
+- `normalize.py [file]` — lifts a finished recording to YouTube's loudness
+  target. Defaults to the newest recording in `~/Movies`. See
+  [Normalizing for YouTube](#normalizing-for-youtube).
+
 None need camera permission; enumerating formats does not open a session.
 
 **After any camera change, reseat the HDMI cable before trusting the output** —
@@ -263,6 +267,48 @@ Adjust the **Wave XLR's analog gain knob**, not the Wave Link fader. The knob is
 the preamp ahead of the converter; a digital fader after the A/D only makes an
 already-clipped signal quieter. That the peak moved with the knob is the proof
 the ceiling was analog. Clipguard is a backstop, not a substitute.
+
+## Normalizing for YouTube
+
+    ./normalize.py            # newest recording in ~/Movies
+    ./normalize.py -n         # measure only, write nothing
+    ./normalize.py <file>     # a specific take
+
+Requires `brew install ffmpeg`. Output lands in `~/Movies/normalized/<name>.mp4`;
+the original is never touched, so re-running is free.
+
+Recording for headroom is the right call on disk and leaves takes far too quiet
+to upload. YouTube plays everything back at about **-14 LUFS** and only turns
+loud uploads *down* — a quiet one is left alone and just sounds weak next to
+every other video. `normalize.py` closes that gap once, deliberately, instead of
+letting the platform do it by accident.
+
+A real take, start to finish:
+
+    integrated -27.0 LUFS   true peak -9.3 dBTP   range 4.2 LU
+    gain +13.0 dB
+    -> integrated -14.7 LUFS   true peak -1.0 dBTP   range 4.0 LU
+
+Four choices worth knowing:
+
+- **Two passes, not one.** Single-pass `loudnorm` is a *dynamic* normalizer that
+  rides the level as it goes, which pumps audibly on speech. Pass 1 measures,
+  pass 2 applies one fixed correction to the whole file.
+- **Video is copied, never re-encoded.** It is already 4K HEVC from the hardware
+  encoder; a re-encode would cost quality and an hour to gain nothing. Only the
+  audio is touched, PCM to AAC 384k at 48 kHz.
+- **A verify pass re-measures the output** and refuses the result if it missed
+  the target, because a silent or mangled audio track otherwise looks exactly
+  like a success. Both measurement passes decode audio only, so three passes
+  over a 4K take stay cheap.
+- **-1 dBTP, not 0.** AAC decodes in the frequency domain and can reconstruct
+  samples slightly above the encoded peak; mastering to 0 clips on someone
+  else's player rather than on this one.
+
+Landing a little under -14 (the -14.7 above) is expected and correct: at +13 dB
+of gain, that -9.3 dBTP peak would have hit +3.7, so the true-peak limiter did
+the last 4.7 dB. If a take routinely needs that much limiting, raise the analog
+gain knob a few dB rather than asking the limiter for more.
 
 ## Open items
 
