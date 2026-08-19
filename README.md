@@ -43,9 +43,13 @@ HDMI Resolution setting and the unplug/replug dance were not needed.
 Result: `Cam Link 4K → 3840x2160 420v 29.97fps` — and it is the *only* mode the
 Cam Link then offers, since it advertises just what it is being fed.
 
-### Still to do on the camera
-- HDMI Info. Display → Off, CTRL FOR HDMI → Off (needs the cable unplugged)
-- Power Save Start Time → Off, Auto Power OFF Temp. → High
+### Camera settings applied
+- File Format XAVC S 4K, Record Setting 30p 100M, Proxy Recording Off
+- 4K Output Select → Memory Card+HDMI
+- HDMI Info. Display → Off, CTRL FOR HDMI → Off (clean feed, no CEC)
+
+Still open: Power Save Start Time → Off, Auto Power OFF Temp. → High. Matters
+most in `Memory Card+HDMI` mode, which is the hottest-running option.
 
 ## Tools
 
