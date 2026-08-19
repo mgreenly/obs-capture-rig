@@ -109,8 +109,9 @@ back into Wave Link.
   silently into defaults. Set it once in the OBS UI — CBR, 100000 Kbps,
   keyframe interval 1s, profile `main` — then capture the file OBS writes and
   add it here.
-- Verify after first launch that Settings → Audio shows Mic/Aux as **Disabled**.
-  Removing the JSON key is believed to be equivalent, but unconfirmed.
+- ~~Verify Mic/Aux is disabled~~ — **confirmed**. Removing the `AuxAudioDevice1`
+  key is equivalent to Disabled; the startup log no longer contains
+  `[Loaded global audio device]` and OBS did not recreate the key.
 - OBS log showed **input monitoring permission denied** — global hotkeys will
   not fire while OBS is backgrounded. Fix in System Settings → Privacy &
   Security → Input Monitoring.
