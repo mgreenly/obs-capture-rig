@@ -1,0 +1,597 @@
+<title>M4 Capture Rig</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+  :root{
+    --ground:#EDEFF0; --panel:#F7F8F8; --sunk:#E3E6E7;
+    --ink:#14181B; --ink-2:#3B454A; --muted:#636E73; --line:#CFD5D7;
+    --video:#A8620F; --video-soft:#F0E2CF;
+    --audio:#1F6A62; --audio-soft:#D6E7E4;
+    --alert:#9E2F27; --alert-soft:#F2DAD7;
+    --shadow:0 1px 2px rgba(20,24,27,.06), 0 6px 18px rgba(20,24,27,.05);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#0E1113; --panel:#171B1E; --sunk:#101416;
+      --ink:#E4E8E9; --ink-2:#BFC7CA; --muted:#8A9498; --line:#2A3135;
+      --video:#E0A050; --video-soft:#3A2B16;
+      --audio:#4FB0A3; --audio-soft:#12312E;
+      --alert:#DC7166; --alert-soft:#3A1D1A;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0E1113; --panel:#171B1E; --sunk:#101416;
+    --ink:#E4E8E9; --ink-2:#BFC7CA; --muted:#8A9498; --line:#2A3135;
+    --video:#E0A050; --video-soft:#3A2B16;
+    --audio:#4FB0A3; --audio-soft:#12312E;
+    --alert:#DC7166; --alert-soft:#3A1D1A;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--ground); color:var(--ink);
+    font-family:"Source Serif 4", Georgia, serif; font-size:17px; line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:60rem; margin:0 auto; padding:3.5rem 1.5rem 6rem;
+        display:flex; flex-direction:column; gap:3.25rem}
+
+  h1,h2,h3,.eyebrow,.chip,.k,.val,th,td,.tag{font-family:Archivo,"Helvetica Neue",Arial,sans-serif}
+  h1{font-size:clamp(2rem,5vw,2.9rem); line-height:1.08; font-weight:700;
+     letter-spacing:-.02em; margin:0; text-wrap:balance}
+  h2{font-size:1.4rem; font-weight:700; letter-spacing:-.01em; margin:0; text-wrap:balance}
+  h3{font-size:1.02rem; font-weight:600; margin:0; letter-spacing:-.005em}
+  p{margin:0}
+  a{color:var(--video)}
+
+  .eyebrow{font-size:.68rem; font-weight:600; letter-spacing:.13em;
+           text-transform:uppercase; color:var(--muted)}
+  .lede{font-size:1.12rem; color:var(--ink-2); max-width:40rem}
+
+  header{display:flex; flex-direction:column; gap:1rem;
+         border-bottom:2px solid var(--ink); padding-bottom:1.75rem}
+  .meta{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.76rem;
+        color:var(--muted); display:flex; flex-wrap:wrap; gap:.4rem 1.25rem}
+
+  section{display:flex; flex-direction:column; gap:1.15rem}
+  .sechead{display:flex; flex-direction:column; gap:.3rem;
+           border-bottom:1px solid var(--line); padding-bottom:.7rem}
+
+  /* signal chain */
+  .chain{display:flex; flex-direction:column; gap:.5rem; background:var(--panel);
+         border:1px solid var(--line); border-radius:3px; padding:1.25rem;
+         box-shadow:var(--shadow); overflow-x:auto}
+  .lane{display:flex; align-items:center; gap:.55rem; min-width:max-content}
+  .chip{font-size:.76rem; font-weight:600; padding:.4rem .7rem; border-radius:2px;
+        background:var(--sunk); border:1px solid var(--line); white-space:nowrap}
+  .chip.v{background:var(--video-soft); border-color:var(--video); color:var(--video)}
+  .chip.a{background:var(--audio-soft); border-color:var(--audio); color:var(--audio)}
+  .chip.out{background:var(--ink); color:var(--ground); border-color:var(--ink)}
+  .arw{color:var(--muted); font-family:"IBM Plex Mono",monospace; font-size:.85rem}
+  .rate{font-family:"IBM Plex Mono",monospace; font-size:.72rem; color:var(--muted);
+        white-space:nowrap}
+  .chain hr{border:0; border-top:1px dashed var(--line); margin:.35rem 0; width:100%}
+
+  /* callouts */
+  .note{border-left:3px solid var(--video); background:var(--panel);
+        padding:1rem 1.15rem; display:flex; flex-direction:column; gap:.5rem;
+        border-radius:0 3px 3px 0}
+  .note.stop{border-left-color:var(--alert); background:var(--alert-soft)}
+  .note.ok{border-left-color:var(--audio); background:var(--audio-soft)}
+  .note h3{color:var(--ink)}
+
+  /* tables */
+  .tblwrap{overflow-x:auto; border:1px solid var(--line); border-radius:3px;
+           background:var(--panel); box-shadow:var(--shadow)}
+  table{border-collapse:collapse; width:100%; min-width:30rem}
+  th,td{text-align:left; padding:.55rem .85rem; font-size:.82rem;
+        border-bottom:1px solid var(--line); font-variant-numeric:tabular-nums}
+  th{font-weight:600; font-size:.68rem; letter-spacing:.09em; text-transform:uppercase;
+     color:var(--muted); background:var(--sunk)}
+  tr:last-child td{border-bottom:0}
+  td.mono,th.mono{font-family:"IBM Plex Mono",monospace}
+  .best td{background:var(--video-soft)}
+  .best td:first-child{box-shadow:inset 3px 0 0 var(--video)}
+
+  /* settings rows */
+  .settings{display:flex; flex-direction:column; background:var(--panel);
+            border:1px solid var(--line); border-radius:3px; box-shadow:var(--shadow)}
+  .row{display:grid; grid-template-columns:14rem 1fr; gap:.35rem 1.25rem;
+       padding:.8rem 1.1rem; border-bottom:1px solid var(--line); align-items:baseline}
+  .row:last-child{border-bottom:0}
+  .k{font-size:.79rem; font-weight:500; color:var(--muted)}
+  .v{display:flex; flex-direction:column; gap:.25rem}
+  .val{font-family:"IBM Plex Mono",monospace; font-size:.86rem; font-weight:600;
+       color:var(--ink)}
+  .why{font-size:.88rem; color:var(--ink-2); line-height:1.5}
+  @media (max-width:640px){ .row{grid-template-columns:1fr} }
+
+  .tag{display:inline-block; font-size:.62rem; font-weight:600; letter-spacing:.1em;
+       text-transform:uppercase; padding:.16rem .45rem; border-radius:2px;
+       vertical-align:.1em; margin-left:.5rem}
+  .tag.v{background:var(--video-soft); color:var(--video)}
+  .tag.a{background:var(--audio-soft); color:var(--audio)}
+
+  pre{font-family:"IBM Plex Mono",monospace; font-size:.79rem; line-height:1.55;
+      background:var(--sunk); border:1px solid var(--line); border-radius:3px;
+      padding:.9rem 1rem; overflow-x:auto; margin:0; color:var(--ink)}
+  code{font-family:"IBM Plex Mono",monospace; font-size:.88em;
+       background:var(--sunk); padding:.08em .32em; border-radius:2px}
+  pre code{background:none; padding:0; font-size:1em}
+
+  ul{margin:0; padding-left:1.15rem; display:flex; flex-direction:column; gap:.45rem}
+  li{padding-left:.15rem}
+  .cols{display:grid; grid-template-columns:repeat(auto-fit,minmax(15rem,1fr)); gap:1rem}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:3px;
+        padding:1.1rem; display:flex; flex-direction:column; gap:.55rem;
+        box-shadow:var(--shadow)}
+  .card .val{font-size:1.15rem}
+  footer{border-top:1px solid var(--line); padding-top:1.5rem; color:var(--muted);
+         font-size:.84rem}
+  :focus-visible{outline:2px solid var(--video); outline-offset:2px}
+</style>
+
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">OBS 32.2.2 &middot; Mac mini M4 &middot; macOS 26.6.2</div>
+  <h1>Capture rig: what the hardware actually gives you</h1>
+  <p class="lede">Camera-first setup for a 4K30 master: what the hardware measurably
+  supports, the settings that unlock it, and a tool to re-check after every change.</p>
+  <div class="meta">
+    <span>10-core M4</span><span>32 GB</span><span>842 GB free (internal)</span>
+    <span>Target: YouTube upload, not live</span>
+  </div>
+</header>
+
+<section>
+  <div class="sechead">
+    <div class="eyebrow">Headline finding</div>
+    <h2>4K60 is not available from any input</h2>
+  </div>
+  <div class="note stop">
+    <h3>Neither capture device can deliver 4K at 60 fps</h3>
+    <p class="why">This is a hardware ceiling on the capture side, not an encoding limit.
+    The M4's media engine would handle 4K60 HEVC without effort — but nothing in the chain
+    can hand it 4K60 frames. Encoder headroom is not your constraint.</p>
+  </div>
+  <div class="note ok">
+    <h3>Resolved &mdash; the camera now feeds 2160p29.97</h3>
+    <p class="why">The blocker was <strong>File Format</strong> sitting on XAVC S HD, not
+    anything in the HDMI chain. <code>4K Output Select</code> was already on
+    <code>Memory Card+HDMI</code>, which was correct all along; it was simply hidden until the
+    camera was switched to Movie mode. Setting XAVC S 4K / 30p 100M with Proxy off flipped the
+    output immediately &mdash; no cable reseat, no HDMI Resolution change needed.</p>
+    <pre><code>Cam Link 4K:  3840 x 2160  420v  29.97 fps   (only format offered)</code></pre>
+  </div>
+</section>
+
+<section>
+  <div class="sechead">
+    <div class="eyebrow">Measured &middot; AVFoundation format enumeration</div>
+    <h2>What each device reports today</h2>
+  </div>
+
+  <h3>Cam Link 4K <span class="tag v">camera</span></h3>
+  <div class="tblwrap">
+    <table>
+      <thead><tr><th class="mono">Resolution</th><th class="mono">Pixel format</th>
+        <th class="mono">Chroma</th><th class="mono">Frame rate</th></tr></thead>
+      <tbody>
+        <tr class="best"><td class="mono">3840 &times; 2160</td><td class="mono">420v</td>
+          <td class="mono">4:2:0</td><td class="mono">29.97</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="why">A single mode, measured after the camera setup below. Because the ZV-1 now
+  sends 2160p29.97, that is the only thing the Cam Link advertises &mdash; nothing to
+  mis-select in OBS. Before the change it offered two 1080p59.94 modes and no 4K at all.</p>
+
+  <h3 style="margin-top:.75rem">Elgato HD60 X <span class="tag v">screen / console</span></h3>
+  <div class="tblwrap">
+    <table>
+      <thead><tr><th class="mono">Resolution</th><th class="mono">Best format</th>
+        <th class="mono">Chroma</th><th class="mono">Frame rates</th></tr></thead>
+      <tbody>
+        <tr class="best"><td class="mono">3840 &times; 2160</td><td class="mono">420v</td>
+          <td class="mono">4:2:0</td><td class="mono">30, 25</td></tr>
+        <tr><td class="mono">2560 &times; 1440</td><td class="mono">420v</td>
+          <td class="mono">4:2:0</td><td class="mono">60, 50, 30, 25</td></tr>
+        <tr><td class="mono">1920 &times; 1080</td><td class="mono">yuvs</td>
+          <td class="mono">4:2:2</td><td class="mono">60, 50, 30, 25</td></tr>
+        <tr><td class="mono">1920 &times; 1080</td><td class="mono">420v</td>
+          <td class="mono">4:2:0</td><td class="mono">120, 60, 50, 30, 25</td></tr>
+        <tr><td class="mono">1600 &times; 1200</td><td class="mono">yuvs</td>
+          <td class="mono">4:2:2</td><td class="mono">60, 50, 30, 25</td></tr>
+        <tr><td class="mono">1280 &times; 720</td><td class="mono">yuvs</td>
+          <td class="mono">4:2:2</td><td class="mono">60, 50, 30, 25</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="why">Your instinct was close: the HD60 X does reach 4K, but only at 30 fps.
+  Note the shape of the tradeoff — 4K is 30p and 4:2:0 only; 4:2:2 chroma appears
+  at 1080p and below. There is no resolution where you get both 4K and 60 fps.</p>
+
+  <div class="note">
+    <h3>A frame-rate mismatch to watch</h3>
+    <p class="why">The Cam Link runs at <strong>59.94</strong> fps (NTSC), while the HD60 X's
+    1080p mode is exactly <strong>60.00</strong>. They are not the same clock. Set the OBS
+    canvas to 59.94 and the camera — your hero source — stays clean; the HD60 X absorbs the
+    0.1% difference far more gracefully than a face does. If you record at 30, use
+    <strong>29.97</strong> for the same reason.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sechead">
+    <div class="eyebrow">Do this first &middot; Sony ZV-1</div>
+    <h2>Getting 4K30 out of the camera</h2>
+  </div>
+
+  <div class="note stop">
+    <h3>Why "4K Output Select" is missing &mdash; the ordering trap</h3>
+    <p class="why">Sony creates a chicken-and-egg here. <strong>HDMI Settings can only be
+    changed while the cable is unplugged.</strong> But <strong>4K Output Select only appears
+    while the cable is plugged into a 4K-capable device.</strong> So there is no single pass
+    through the menu that sets both &mdash; you have to configure one, move the cable, then
+    configure the other. Steps below are split accordingly.</p>
+  </div>
+
+  <div class="note">
+    <h3>It is not the HD60 X</h3>
+    <p class="why">The HD60 X sits on a separate cable entirely and never touches the camera's
+    HDMI path. Its capability list is also static &mdash; it advertises all 14 modes, down to
+    720&times;480 SD, no matter what is plugged into it. The Cam Link is the opposite: it
+    reports only what it is actually being fed, which is how we know your camera is sending
+    1080p59.94 right now.</p>
+  </div>
+
+  <div class="settings">
+    <div class="row"><div class="k">1 &middot; Movie mode</div><div class="v">
+      <div class="val">Press the Mode button &rarr; Movie</div>
+      <div class="why"><strong>Most likely culprit.</strong> The ZV-1 uses a Mode button on
+      the top plate cycling Still / Movie / S&amp;Q &mdash; there is no mode dial. Pressing the
+      red MOVIE record button records video but does <em>not</em> put the camera in Movie mode,
+      and 4K Output Select stays hidden in Still mode. Confirm the screen shows movie
+      framing and a movie-mode icon before going further.</div></div></div>
+    <div class="row"><div class="k">2 &middot; Region</div><div class="v">
+      <div class="val">MENU &rarr; Setup &rarr; NTSC/PAL Selector &rarr; NTSC</div>
+      <div class="why">30p only exists in NTSC; PAL gives 25p. This restarts the camera and
+      wants the card reformatted, so get it done early.</div></div></div>
+    <div class="row"><div class="k">3 &middot; File format</div><div class="v">
+      <div class="val">MENU &rarr; Movie tab &rarr; File Format &rarr; XAVC S 4K</div>
+      <div class="why">The <strong>Movie</strong> tab &mdash; Sony's documentation calls it
+      "Camera Settings2", but the camera labels it Movie1 / Movie2. Not the Quality/ImageSize
+      tab, which is stills only. Record Setting <code>30p 100M</code> sits directly
+      below.</div></div></div>
+    <div class="row"><div class="k">4 &middot; Proxy recording</div><div class="v">
+      <div class="val">MENU &rarr; Movie tab &rarr; Proxy Recording &rarr; Off</div>
+      <div class="why">Same Movie tab, usually a page across &mdash; use the right arrow to
+      reach Movie2. Sony is explicit: recording 4K with proxy active means movies "will not be
+      output to a device connected by HDMI cable." No on-screen warning &mdash; just a dead
+      capture.</div></div></div>
+  </div>
+
+  <div class="note">
+    <h3>Now unplug the HDMI cable</h3>
+    <p class="why">HDMI Settings grey out while a cable is attached. Disconnect it from the
+    camera before attempting the next three.</p>
+  </div>
+
+  <div class="settings">
+    <div class="row"><div class="k">5 &middot; HDMI resolution</div><div class="v">
+      <div class="val">MENU &rarr; Setup &rarr; HDMI Settings &rarr; HDMI Resolution &rarr; 2160p/1080p</div>
+      <div class="why">Not Auto. Auto negotiates against the Cam Link's EDID and often settles
+      on 1080p.</div></div></div>
+    <div class="row"><div class="k">6 &middot; Clean output</div><div class="v">
+      <div class="val">HDMI Settings &rarr; HDMI Info. Display &rarr; Off</div>
+      <div class="why">Strips focus boxes and overlays from the feed.</div></div></div>
+    <div class="row"><div class="k">7 &middot; Device control</div><div class="v">
+      <div class="val">HDMI Settings &rarr; CTRL FOR HDMI &rarr; Off</div>
+      <div class="why">Stops the camera reacting to HDMI-CEC chatter mid-take.</div></div></div>
+  </div>
+
+  <div class="note ok">
+    <h3>Plug the cable back in &mdash; camera to Cam Link, Cam Link to the Mac</h3>
+    <p class="why">The Cam Link is bus-powered and only presents its 4K EDID once the Mac has
+    it enumerated. Both ends connected, camera on, still in Movie mode. <em>Now</em> the next
+    item should exist.</p>
+  </div>
+
+  <div class="settings">
+    <div class="row"><div class="k">8 &middot; 4K output select</div><div class="v">
+      <div class="val">MENU &rarr; Setup &rarr; 4K Output Select &rarr; HDMI Only(30p)</div>
+      <div class="why">Choose <code>Memory Card+HDMI</code> instead if you want a card backup
+      &mdash; it costs thermal headroom and clip length, and step 4 becomes
+      non-negotiable.</div></div></div>
+    <div class="row"><div class="k">9 &middot; Power management</div><div class="v">
+      <div class="val">Power Save Start Time &rarr; Off &nbsp;&middot;&nbsp; Auto Power OFF Temp. &rarr; High</div>
+      <div class="why">Otherwise the camera sleeps mid-session and the capture goes black. The
+      ZV-1 runs warm in 4K; High buys real runtime.</div></div></div>
+  </div>
+
+  <div class="note">
+    <h3>If it is still missing after all that</h3>
+    <p class="why">Work down in this order. <strong>The cable</strong> &mdash; the ZV-1's port
+    is micro-HDMI (Type D), and a marginal cable can pass 1080p fine yet fail the EDID read
+    that tells the camera it is talking to a 4K device. <strong>The port</strong> &mdash; move
+    the Cam Link to a different Mac port and confirm it still enumerates.
+    <strong>Menu recall</strong> &mdash; if the camera has a customized menu, check the Setup
+    tab page by page rather than trusting recall. A settings reset is the blunt last
+    resort.</p>
+  </div>
+
+  <div class="note ok">
+    <h3>Verify before touching OBS</h3>
+    <p class="why">Re-run the tool. You want <code>3840 x 2160</code> to appear under Cam Link
+    4K, and the format count to change from 2. If it does not, the camera is still sending
+    1080p and no OBS setting will change that. Reconnect the HDMI cable after any camera
+    change &mdash; the Cam Link caches the handshake and keeps reporting stale modes.</p>
+    <pre><code>./caps      # full mode list
+./sig       # connection state + format count</code></pre>
+  </div>
+
+  <div class="note">
+    <h3>What 4K costs you here</h3>
+    <p class="why">The Cam Link offers 4:2:2 chroma (<code>yuvs</code>) at 1080p but only 4:2:0
+    (<code>420v</code>) at 2160p, so the 4K path subsamples color more aggressively. At four
+    times the pixel count it is still clearly the better image &mdash; but the trade is real,
+    and it is the Cam Link imposing it, not the camera.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sechead">
+    <div class="eyebrow">Signal flow</div>
+    <h2>How the chain should be wired</h2>
+  </div>
+  <div class="chain">
+    <div class="lane">
+      <span class="chip">Camera</span><span class="arw">&rarr;</span>
+      <span class="chip v">Cam Link 4K</span><span class="arw">&rarr;</span>
+      <span class="rate">2160p29.97 420v &middot; USB bus 0x02</span>
+    </div>
+    <div class="lane">
+      <span class="chip">HDMI source</span><span class="arw">&rarr;</span>
+      <span class="chip v">Elgato HD60 X</span><span class="arw">&rarr;</span>
+      <span class="rate">2160p30 420v &middot; USB bus 0x32</span>
+    </div>
+    <hr>
+    <div class="lane">
+      <span class="chip">Mic</span><span class="arw">&rarr;</span>
+      <span class="chip a">Wave XLR</span><span class="arw">&rarr;</span>
+      <span class="chip a">Wave Link + filters</span><span class="arw">&rarr;</span>
+      <span class="chip a">Stream Mix</span><span class="arw">&rarr;</span>
+      <span class="rate">into OBS</span>
+    </div>
+    <div class="lane">
+      <span class="arw" style="padding-left:11.5rem">&#8627;</span>
+      <span class="chip a">Monitor Mix</span><span class="arw">&rarr;</span>
+      <span class="chip">Headphones</span>
+      <span class="rate">never touches OBS</span>
+    </div>
+    <hr>
+    <div class="lane">
+      <span class="chip out">OBS canvas</span><span class="arw">&rarr;</span>
+      <span class="chip out">HEVC hardware + PCM</span><span class="arw">&rarr;</span>
+      <span class="chip out">.mov master</span><span class="arw">&rarr;</span>
+      <span class="rate">YouTube</span>
+    </div>
+  </div>
+  <p class="why">The two capture devices already sit on separate USB controllers
+  (location IDs <code>0x02…</code> and <code>0x32…</code>) — keep them there. Two
+  simultaneous high-bandwidth uncompressed streams on one shared bus is where dropped
+  frames come from.</p>
+</section>
+
+<section>
+  <div class="sechead">
+    <div class="eyebrow">Settings &rarr; Video</div>
+    <h2>Canvas</h2>
+  </div>
+  <div class="settings">
+    <div class="row"><div class="k">Base (canvas) resolution</div><div class="v">
+      <div class="val">3840 x 2160</div>
+      <div class="why">Already correct.</div></div></div>
+    <div class="row"><div class="k">Output (scaled) resolution</div><div class="v">
+      <div class="val">3840 x 2160</div>
+      <div class="why">Currently 1920x1080 — you are throwing away the entire 4K canvas
+      before it reaches the encoder. This is the biggest single fix in your config.</div></div></div>
+    <div class="row"><div class="k">Downscale filter</div><div class="v">
+      <div class="val">Lanczos</div>
+      <div class="why">Irrelevant once base and output match, but it also governs per-source
+      scaling — and your 1080p camera is being scaled up into a 4K canvas, where it
+      matters.</div></div></div>
+    <div class="row"><div class="k">FPS type / value</div><div class="v">
+      <div class="val">Fractional &mdash; 30000 / 1001</div>
+      <div class="why">Not the integer "30" preset. Sony's "30p" in NTSC is really 29.97, and a
+      30.00 canvas against a 29.97 source duplicates a frame every few seconds. Confirm the
+      exact rate with the tool once 4K appears.</div></div></div>
+  </div>
+</section>
+
+<section>
+  <div class="sechead">
+    <div class="eyebrow">Source properties &middot; each capture device</div>
+    <h2>Per-device capture settings</h2>
+  </div>
+  <div class="settings">
+    <div class="row"><div class="k">Preset</div><div class="v">
+      <div class="val">Off &mdash; use custom</div>
+      <div class="why">Presets let macOS renegotiate the format behind your back. Pin it
+      explicitly so you always know what you are recording.</div></div></div>
+    <div class="row"><div class="k">Cam Link 4K</div><div class="v">
+      <div class="val">3840x2160 &middot; 29.97 &middot; 420v</div>
+      <div class="why">Available only after the ZV-1 setup above. At 2160p the Cam Link offers
+      no 4:2:2 option, so <code>420v</code> is the only choice.</div></div></div>
+    <div class="row"><div class="k">Elgato HD60 X</div><div class="v">
+      <div class="val">3840x2160 &middot; 30 &middot; 420v</div>
+      <div class="why">Native 4K30, matching the camera. No scaling on either source, and no
+      mixed frame rates anywhere in the scene.</div></div></div>
+    <div class="row"><div class="k">Color range</div><div class="v">
+      <div class="val">Match the source</div>
+      <div class="why">HDMI from a camera is normally <strong>limited</strong>; a computer
+      desktop is often <strong>full</strong>. Grey-looking blacks mean limited data
+      interpreted as full; crushed shadows mean the reverse. Set each source
+      independently.</div></div></div>
+    <div class="row"><div class="k">Buffering</div><div class="v">
+      <div class="val">Disabled</div>
+      <div class="why">Adds latency; only enable if you see tearing or stutter you cannot
+      otherwise fix.</div></div></div>
+  </div>
+</section>
+
+<section>
+  <div class="sechead">
+    <div class="eyebrow">Settings &rarr; Output &middot; switch mode to Advanced</div>
+    <h2>Recording</h2>
+  </div>
+  <div class="note stop">
+    <h3>Your current output config is the main quality bottleneck</h3>
+    <p class="why">Simple mode, <code>VBitrate=6000</code>, <code>RecQuality=Small</code>,
+    downscaled to 1080p, H.264. That is roughly a sixteenth of the bitrate a 4K master wants,
+    at a quarter of the pixels. Switch to Advanced.</p>
+  </div>
+  <div class="settings">
+    <div class="row"><div class="k">Output mode</div><div class="v">
+      <div class="val">Advanced</div>
+      <div class="why">Simple mode cannot express most of what follows.</div></div></div>
+    <div class="row"><div class="k">Type / Format</div><div class="v">
+      <div class="val">Standard &middot; hybrid MOV</div>
+      <div class="why">You already use hybrid MOV. Keep it — fragmented, so a crash or power
+      loss leaves a playable file, and it carries PCM audio and ProRes, which MP4
+      will not.</div></div></div>
+    <div class="row"><div class="k">Video encoder</div><div class="v">
+      <div class="val">Apple VT HEVC Hardware Encoder</div>
+      <div class="why">Runs on the M4's dedicated media engine — near-zero CPU, and much
+      better quality per bit than H.264 at 4K.</div></div></div>
+    <div class="row"><div class="k">Rate control / Bitrate</div><div class="v">
+      <div class="val">CBR &middot; 100000 Kbps</div>
+      <div class="why">Deliberately generous. YouTube's own recommendation for 4K SDR upload
+      is 35&ndash;45 Mbps H.264; 100 Mbps HEVC gives the re-encoder a clean master with room
+      to spare. About 45 GB/hour against your 842 GB free.</div></div></div>
+    <div class="row"><div class="k">Profile</div><div class="v">
+      <div class="val">main</div>
+      <div class="why">8-bit. Use <code>main10</code> with color format P010 only if you
+      deliberately want a 10-bit pipeline — it helps gradients but complicates
+      editing.</div></div></div>
+    <div class="row"><div class="k">Keyframe interval</div><div class="v">
+      <div class="val">1 s</div>
+      <div class="why">Frequent keyframes make scrubbing and cutting in an editor far more
+      responsive. Costs little at this bitrate.</div></div></div>
+    <div class="row"><div class="k">Audio encoder</div><div class="v">
+      <div class="val">FFmpeg PCM (24-bit)</div>
+      <div class="why">Lossless, and the reason to stay on MOV. If you would rather keep files
+      small, AAC at <strong>320</strong> Kbps — but not your current 160.</div></div></div>
+    <div class="row"><div class="k">Audio track</div><div class="v">
+      <div class="val">Track 1 only</div>
+      <div class="why">Wave Link already delivers one finished mix; multi-track adds nothing
+      here.</div></div></div>
+  </div>
+  <div class="note">
+    <h3>If you edit before uploading</h3>
+    <p class="why">Consider <strong>Apple ProRes 422</strong> instead of HEVC — the M4's media
+    engine encodes it in hardware, and it is dramatically friendlier on an editing timeline
+    (no long-GOP decoding). The cost is size: roughly 210 GB/hour at 4K30 versus 45 GB/hour
+    for HEVC. Fine for a one-hour shoot on 842 GB free; plan storage if you shoot often.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sechead">
+    <div class="eyebrow">Settings &rarr; Audio &middot; and Advanced Audio Properties</div>
+    <h2>Wave Link routing</h2>
+  </div>
+  <div class="settings">
+    <div class="row"><div class="k">Desktop Audio (both)</div><div class="v">
+      <div class="val">Disabled</div>
+      <div class="why">You are not capturing desktop audio, and leaving them enabled invites
+      stray system sounds into the recording.</div></div></div>
+    <div class="row"><div class="k">Mic / Auxiliary Audio</div><div class="v">
+      <div class="val">Elgato Wave Link Stream Mix</div>
+      <div class="why">Stream Mix is Wave Link's post-filter output — this is how you get its
+      processing. Name the device explicitly; never leave it on
+      <code>Default</code>.</div></div></div>
+    <div class="row"><div class="k">Mic/Aux 2, 3, 4</div><div class="v">
+      <div class="val">Disabled</div>
+      <div class="why">Every enabled device is another CoreAudio start that can stall OBS
+      launch.</div></div></div>
+    <div class="row"><div class="k">Sample rate</div><div class="v">
+      <div class="val">48 kHz</div>
+      <div class="why">Already correct, and matches Wave Link. A mismatch forces resampling
+      and can drift over a long take.</div></div></div>
+    <div class="row"><div class="k">Channels</div><div class="v">
+      <div class="val">Stereo</div>
+      <div class="why">Already correct.</div></div></div>
+    <div class="row"><div class="k">Monitoring device</div><div class="v">
+      <div class="val">Elgato Wave XLR</div>
+      <div class="why">Set it, but see below — nothing should actually route to it.</div></div></div>
+    <div class="row"><div class="k">Audio Monitoring, per source</div><div class="v">
+      <div class="val">Monitor Off</div>
+      <div class="why">Critical. Wave Link's Monitor Mix already feeds your headphones. If OBS
+      also monitors, you get doubled audio, comb filtering, and potentially a feedback loop
+      back into Wave Link.</div></div></div>
+  </div>
+  <div class="note ok">
+    <h3>The division of labor</h3>
+    <p class="why">Wave Link owns everything you hear and every filter applied. OBS owns
+    only what gets written to disk — it takes Stream Mix as a finished signal and does not
+    process or play it back. Keep OBS's own audio filters empty unless you find something
+    Wave Link genuinely cannot do.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sechead">
+    <div class="eyebrow">Verification</div>
+    <h2>Checking what OBS is actually receiving</h2>
+  </div>
+  <p class="why">OBS 32's capture plugin does not log the negotiated format, and a properties
+  dropdown set to "Preferred" will not tell you what it settled on. Three reliable methods,
+  cheapest first:</p>
+  <ul>
+    <li><strong>Source size in the transform dialog.</strong> Select the source, press
+    <code>&#8984;E</code>. "Size" is the true incoming resolution — not the scaled box on
+    your canvas. Fastest resolution check, tells you nothing about frame rate.</li>
+    <li><strong>The capability tool below.</strong> Lists every mode each device is currently
+    offering. Because these capture devices advertise modes based on the signal they are being
+    fed, this doubles as a check on what your camera is sending.</li>
+    <li><strong>The Stats dock</strong> (View &rarr; Docks &rarr; Stats). Shows composited
+    output FPS and frames missed due to rendering lag — the place to confirm the whole
+    pipeline is keeping up once you hit record.</li>
+  </ul>
+  <p class="why">The tool is built and sitting at
+  <code>caps</code> in this session's scratchpad. Re-run it after any camera or cable change:</p>
+  <pre><code>swiftc -O caps.swift -o caps &amp;&amp; ./caps</code></pre>
+  <p class="why">It needs no camera permission — enumerating formats does not open a capture
+  session — and no dependencies beyond the Swift toolchain you already have.</p>
+</section>
+
+<section>
+  <div class="sechead">
+    <div class="eyebrow">Loose ends</div>
+    <h2>Two unrelated fixes worth doing</h2>
+  </div>
+  <div class="settings">
+    <div class="row"><div class="k">Input monitoring denied</div><div class="v">
+      <div class="val">System Settings &rarr; Privacy &amp; Security &rarr; Input Monitoring</div>
+      <div class="why">Your OBS log shows this permission denied. Global hotkeys will not fire
+      while OBS is in the background. Enable OBS there — relevant if you drive anything from
+      the keyboard alongside the Stream Deck.</div></div></div>
+    <div class="row"><div class="k">The 2.5-minute launch hang</div><div class="v">
+      <div class="val">Fixed by naming the audio device</div>
+      <div class="why">Setting Mic/Aux to Wave Link Stream Mix rather than
+      <code>Default</code> takes the HD60 X out of OBS's startup path, which is what stalled
+      launch earlier. If it ever recurs: <code>sudo killall coreaudiod</code>.</div></div></div>
+  </div>
+</section>
+
+<footer>
+  Device capabilities measured directly via AVFoundation on this machine. Encoder and
+  bitrate figures are recommendations; capture modes are observed fact.
+</footer>
+
+</div>
