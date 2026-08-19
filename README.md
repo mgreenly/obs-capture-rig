@@ -96,6 +96,30 @@ Three deliberate design choices:
 | Global Mic/Aux | `default` → HD60 X, a second live audio path | removed |
 | ZV1 PiP scale | 1.295 (sized for 1920) | ~0.647 (same on-screen size at 3840) |
 
+## Verified end to end
+
+A 13 s test recording, read back with `bin/probe`:
+
+    VIDEO  3840x2160  29.970 fps  codec hvc1
+           ColorPrimaries / TransferFunction / YCbCrMatrix: ITU_R_709_2
+           FullRangeVideo: 0
+    AUDIO  lpcm  48000 Hz  2 ch  24-bit
+    153.6 MB / 13.08 s  ->  98.5 Mbps overall
+
+Every intent survived to disk: native 4K, 29.97 to match the ZV-1, HEVC
+(`hvc1`), Rec.709 limited range, lossless 24-bit PCM audio, and CBR landing
+within 1.5% of the 100 Mbps target.
+
+From the OBS log:
+
+    [VideoToolbox advanced_video_recording: 'hevc']: session created with
+    hardware encoding
+    Number of lagged frames due to rendering lag/stalls: 1 (0.2%)
+
+One lagged frame at session start, no errors or warnings. Two simultaneous 4K
+USB capture streams plus hardware HEVC encoding is comfortably within the M4's
+headroom.
+
 ## Audio routing
 
 Wave Link owns everything heard and every filter applied. OBS takes **Stream
