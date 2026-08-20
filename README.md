@@ -28,6 +28,64 @@ headroom. Hence 4K30 everywhere.
 
 Measured, not from spec sheets — see `make probe`.
 
+## Clocks and latencies
+
+Three independent clock domains, none of them locked to any other:
+
+| Domain | Devices on it |
+|---|---|
+| **Cam Link 4K** | the picture, and the camera's own mic embedded in the same HDMI stream |
+| **Wave XLR** | the microphone interface itself |
+| **Wave Link** | the virtual devices (Stream Mix, Chat Mix, Personal Mix) |
+
+Everything below was measured on one 99 s take with all three recorded
+simultaneously. Sign convention: **negative means that audio arrives ahead of
+the camera's audio**, i.e. earlier in the file.
+
+| pairing | constant | rate |
+|---|---|---|
+| Wave XLR direct vs Cam Link | −143.5 ms | none detectable |
+| Wave Link vs Cam Link | −17.9 ms at t=0 | **+66 ppm** |
+| Wave Link vs Wave XLR direct | +125.8 ms at t=0 | **+62 ppm** (sample level) |
+
+The three close as a triangle to 0.1 ms, which is the check that no single
+measurement is inventing its answer.
+
+What that says about each device:
+
+- **The Wave XLR interface and the Cam Link keep time with each other.** No slope
+  is detectable between them across 99 s. Two unrelated USB devices agreeing this
+  well is luck rather than design, and it should be re-checked rather than
+  assumed if either is replaced.
+- **Wave Link is the only thing that drifts.** Its virtual device runs about
+  62 ppm slow, which is 3.7 ms per minute. That is ordinary for an unlocked
+  crystal — consumer audio clocks are specified to ±50 or ±100 ppm — and it is
+  **not** the 29.97-vs-30 pulldown ratio, which is 1000 ppm and would slip a
+  full second every 17 minutes.
+- **Wave Link costs about 129 ms of latency**, stable to a millisecond within a
+  take. That is the whole app path, not the processing: switching Voice Focus and
+  the gate off moves the number by 20–30 ms, not by 129.
+- **The constant is a property of the capture session, the rate is a property of
+  the hardware.** Six takes of this rig landed between −9.8 and −54.2 ms because
+  the USB buffers align differently each time OBS starts the sources. The rate
+  should be a fixed ratio between two crystals, but that has been measured on
+  one take, so `normalize.py` measures it per take rather than pinning it.
+
+Two practical consequences:
+
+- **The Wave XLR presents one input channel.** OBS duplicates it to stereo, so
+  track 3 reads as 2 identical channels. The Wave Link virtual devices and the
+  Cam Link present two.
+- **Device identity is not stable in the same way for both.** The Wave XLR has a
+  hardware UID (`AppleUSBAudioEngine:Elgato Systems:Elgato Wave XLR:…`) that
+  survives reinstalls; the Wave Link virtual devices use GUIDs that regenerate,
+  which is why `apply.py` resolves audio devices **by name** at apply time.
+
+Everything here is measured against the camera's *audio*, which stands in for the
+picture. The camera-audio-to-frames bias is still unmeasured and
+`REFERENCE_BIAS_MS` is still 0, so a constant error common to all three rows
+would be invisible.
+
 ## Camera: Sony ZV-1
 
 4K HDMI output is gated behind settings that are easy to miss:
