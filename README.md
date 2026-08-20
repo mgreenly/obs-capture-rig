@@ -634,16 +634,16 @@ Requires `brew install ffmpeg`. Output lands in `~/Movies/normalized/<name>.mp4`
 the original is never touched, so re-running is free.
 
 Recording for headroom is the right call on disk and leaves takes far too quiet
-to upload. YouTube plays everything back at about **-14 LUFS** and only turns
-loud uploads *down* — a quiet one is left alone and just sounds weak next to
-every other video. `normalize.py` closes that gap once, deliberately, instead of
-letting the platform do it by accident.
+to upload. YouTube turns loud uploads *down* toward about **-14 LUFS** and leaves
+quiet ones alone, so a raw take just sounds weak next to every other video.
+`normalize.py` closes that gap once, deliberately, instead of letting the
+platform do it by accident.
 
 A real take, start to finish:
 
-    integrated -27.0 LUFS   true peak -9.3 dBTP   range 4.2 LU
-    gain +13.0 dB
-    -> integrated -14.7 LUFS   true peak -1.0 dBTP   range 4.0 LU
+    integrated -26.6 LUFS   true peak -4.9 dBTP   range 12.1 LU
+    gain +6.6 dB
+    -> integrated -20.0 LUFS   true peak -1.0 dBTP   range 11.5 LU
 
 Four choices worth knowing:
 
@@ -691,10 +691,61 @@ Four choices worth knowing:
   samples slightly above the encoded peak; mastering to 0 clips on someone
   else's player rather than on this one.
 
-Landing a little under -14 (the -14.7 above) is expected and correct: at +13 dB
-of gain, that -9.3 dBTP peak would have hit +3.7, so the true-peak limiter did
-the last 4.7 dB. If a take routinely needs that much limiting, raise the analog
-gain knob a few dB rather than asking the limiter for more.
+Landing exactly on target with 11.5 LU of the take's original 12.1 LU intact is
+what a correction this size buys: +6.6 dB leaves that -4.9 dBTP peak at +1.7, so
+the limiter has only that much to shave. Asking for more gain is what costs
+range — see the table below.
+
+### The target is -20, not -14
+
+**-14 is a ceiling, not an average.** YouTube's normalization is one-directional:
+it attenuates uploads louder than its target and leaves quieter ones exactly as
+they are. So the videos a viewer moves through play back at -14 *and everything
+below it* — older uploads, anything mastered to broadcast levels, spoken-word
+content that was never normalized at all. A file mastered to -14 is therefore
+louder than most of what it sits next to. That is the "why is this so loud"
+complaint, and it is the -14 target working exactly as specified.
+
+Two measurements taken on 2026-08-20, from **Stats for nerds** → the
+`Volume / Normalized` row:
+
+    this rig, uploaded at TARGET_I=-14   100%/100% (cont.-14.4dB tgt.-14.0dB)
+    a reference that sounds normal       100%/100% (cont.-23.0dB tgt.-14.0dB)
+
+`cont.` is what YouTube measured; `tgt.` is the -14 ceiling; `100%/100%` means
+**nothing was turned down**. Neither file was touched, and they still sit 8.6 dB
+apart. None of that gap is the platform's doing — it is entirely a mastering
+choice, which is the same as saying `TARGET_I` decides it outright.
+
+**-20, not -23.** That reference is mastered to the EBU R128 *broadcast* target,
+which is the quiet end of what a viewer meets rather than the middle of it.
+Matching it exactly would trade being the loudest video in the feed for being
+the quietest, and YouTube never turns a quiet upload back up. -20 sits just under
+the -19 midpoint of the two measurements, well clear of the original complaint
+without heading for broadcast spec.
+
+Going quieter also costs nothing in quality — it *gains* some, because a smaller
+correction leaves less for the true-peak limiter to do. The same 98 s take, which
+arrives at -26.6 LUFS with 12.1 LU of range and a -4.9 dBTP peak:
+
+| target | gain | landed | true peak | range out |
+|-------:|-----:|-------:|----------:|----------:|
+| -16 | +10.6 dB | -16.3 | -0.9 dBTP | 9.5 LU |
+| -19 | +7.6 dB | -19.1 | -1.0 dBTP | 10.9 LU |
+| **-20** | **+6.6 dB** | **-20.0** | **-1.0 dBTP** | **11.5 LU** |
+| -21 | +5.6 dB | -21.0 | -1.0 dBTP | 12.0 LU |
+
+At -16 the limiter eats 2.6 LU of range to reach the target. At -20 it eats 0.6.
+
+Dense continuous speech compounds the problem at any target. At the same
+integrated loudness, a narrow loudness range reads subjectively louder than
+wide-range content, because there are no quiet stretches pulling the perceived
+average down.
+
+**Retune by measuring, not by ear.** Read `cont.` off a new upload and off a few
+videos that sound right; the difference is what to change `TARGET_I` by.
+
+    ./normalize.py -i -21      # this take only, quieter still
 
 ## Open items
 

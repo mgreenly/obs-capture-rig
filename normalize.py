@@ -9,11 +9,12 @@ Writes a new file to ~/Movies/normalized/ and never touches the original.
 
 Why this exists: the rig records lossless 24-bit PCM with deliberate headroom
 (see README, "Set gain for headroom, not for level"). Takes land around -30 dBFS
-RMS, which is correct on disk and far too quiet for upload. YouTube plays
-everything back at about -14 LUFS: quieter uploads are left alone, so a raw take
-just sounds weak next to every other video. This lifts it to that target once,
-in one clean gain/limiter stage, instead of letting the platform's loudness
-gap do it by accident.
+RMS, which is correct on disk and far too quiet for upload. YouTube turns loud
+uploads down toward about -14 LUFS and leaves quiet ones alone, so a raw take
+just sounds weak next to every other video. This closes that gap once, in one
+clean gain/limiter stage, instead of letting the platform's loudness rules do it
+by accident. It aims a couple of LU UNDER YouTube's number rather than at it --
+see TARGET_I for why that is not the same as being quiet.
 
 Design notes:
   * TWO-PASS loudnorm. The single-pass form is a dynamic normalizer that rides
@@ -48,11 +49,58 @@ MOVIES  = os.path.expanduser("~/Movies")
 OUTDIR  = os.path.join(MOVIES, "normalized")
 EXTS    = (".mov", ".mp4", ".mkv", ".m4v")
 
-# YouTube normalizes playback to roughly -14 LUFS integrated. -1 dBTP of true-peak
-# headroom is the usual allowance for lossy-codec overshoot: AAC is decoded in the
-# frequency domain and can reconstruct samples slightly above the encoded peak, so
-# mastering to 0 dBTP clips on someone else's player rather than on ours.
-TARGET_I   = -14.0
+# YouTube normalizes playback to roughly -14 LUFS integrated, and this sits two LU
+# UNDER that on purpose.
+#
+# -14 is a CEILING, not an average. YouTube's normalization only turns loud uploads
+# down; a quiet one is left exactly as it is. So the catalogue a viewer moves
+# through plays back at -14 and everything below it, and a file mastered to -14
+# exactly is louder than most of what it sits next to -- which is the "why is this
+# so loud" complaint, working as designed. Two LU of margin puts a take in the
+# middle of that spread instead of at the top of it.
+#
+# It is also a floor of sorts: going much below -16 gives up loudness YouTube will
+# never hand back, since it does not amplify quiet uploads.
+#
+# MEASURED, not guessed. Right-click a watch page -> Stats for nerds -> the
+# "Volume / Normalized" row, which reads e.g.
+#
+#     100%/100% (cont.-14.4dB tgt.-14.0dB)
+#
+# "cont." is what YouTube measured the upload at, "tgt." is the -14 ceiling, and
+# the percentages are what it did about it. 100%/100% means NOTHING was turned
+# down, which is the normal case for anything at or below the ceiling.
+#
+# Two takes measured on 2026-08-20:
+#
+#     this rig, at TARGET_I=-14   cont.-14.4dB   100%/100%
+#     a reference that sounds ok  cont.-23.0dB   100%/100%
+#
+# An 8.6 dB gap with neither file attenuated. That is the whole complaint, and it
+# is entirely a mastering choice: YouTube is not normalizing either one.
+#
+# -20 is a judgement call inside a narrow band, landed on by ear.
+#
+# The floor of the argument is -23: that reference is mastered to the EBU R128
+# BROADCAST target, which is the quiet end of what a viewer meets rather than the
+# middle of it, and matching it exactly trades being the loudest video in the feed
+# for being the quietest. The ceiling is around -19, the midpoint of the two
+# measurements above. -20 sits just under that midpoint: comfortably clear of the
+# complaint that started this, without drifting toward broadcast spec.
+#
+# The lower target also asks LESS of the true-peak limiter, which is a real bonus
+# rather than a wash. At -14 this rig's takes needed enough gain that the limiter
+# took several dB off the peaks and squashed the loudness range with it; each
+# step down hands some of that range back. Measured on one 98 s take:
+#
+#     target   gain     landed    true peak   range (12.1 LU in)
+#     -16      +10.6    -16.3     -0.9        9.5
+#     -19      +7.6     -19.1     -1.0        10.9
+#     -20      +6.6     -20.0     -1.0        11.5
+#     -21      +5.6     -21.0     -1.0        12.0
+#
+# Sample a few more videos and move it if they disagree.
+TARGET_I   = -20.0
 TARGET_TP  = -1.0
 TARGET_LRA = 11.0
 
@@ -327,8 +375,9 @@ def normalize(src, stats, dst, video, audio, track=1, sync_ms=0, drift_ppm=0.0):
 
 
 def main():
+    global TARGET_I        # --target-i rebinds it; see the note below
     ap = argparse.ArgumentParser(
-        description="Normalize a recording's audio to YouTube's -14 LUFS target.")
+        description="Normalize a recording's audio for YouTube playback loudness.")
     ap.add_argument("file", nargs="?",
                     help="recording to normalize (default: newest in ~/Movies)")
     ap.add_argument("-o", "--output", help="output path (default: ~/Movies/normalized/<name>.mp4)")
@@ -345,6 +394,10 @@ def main():
                     help="parts per million the audio clock runs slow against the "
                          "camera's, or 'auto' to measure it from the take "
                          "(default: %s; 0 leaves the rate alone)" % DRIFT_PPM)
+    ap.add_argument("-i", "--target-i", type=float, default=None, metavar="LUFS",
+                    help="integrated loudness to normalize to (default %.1f). Lower "
+                         "is quieter next to other videos; see the note on TARGET_I"
+                         % TARGET_I)
     ap.add_argument("--no-verify", action="store_true",
                     help="skip the verification pass over the output")
     ap.add_argument("--no-level", action="store_true",
@@ -352,6 +405,17 @@ def main():
                          "with -s 0 -d 0, since a silent reference track is exactly "
                          "what makes a sync measurement meaningless")
     args = ap.parse_args()
+
+    # Rebound rather than threaded, because measure() and normalize() read the
+    # target from module scope and a per-take override has to reach both of them
+    # and the verify pass identically. A target the verify pass disagreed with
+    # would fail every run it was used on.
+    if args.target_i is not None:
+        if not -40.0 <= args.target_i <= -5.0:
+            die("--target-i %.1f is not a plausible loudness target. YouTube plays "
+                "back near -14 LUFS; useful values sit within a few LU of it."
+                % args.target_i)
+        TARGET_I = args.target_i
 
     for tool in ("ffmpeg", "ffprobe"):
         if not shutil.which(tool):
