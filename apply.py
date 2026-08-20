@@ -23,8 +23,12 @@ Design notes:
   * One source can appear in several scenes in different roles (Sony ZV1 is a
     PiP in Desktop and full-frame in BigHead), so scene-item policy is keyed on
     (scene, item), never on the source name alone.
+  * Capture sources are matched by TYPE, so renaming them in OBS is free -- but
+    audio is the exception. There are now two coreaudio sources, and the type no
+    longer tells them apart, so AUDIO_SOURCES is keyed on the source NAME and an
+    unrecognised audio source is an error rather than a guess.
 """
-import configparser, json, os, shutil, subprocess, sys, time
+import configparser, json, os, shutil, subprocess, sys, time, uuid
 
 HOME     = os.path.expanduser("~")
 OBSROOT  = os.path.join(HOME, "Library/Application Support/obs-studio")
@@ -85,7 +89,7 @@ PROFILE_INI = {
         "RecFormat2": "hybrid_mov",
         "RecEncoder": "com.apple.videotoolbox.videoencoder.ave.hevc",
         "RecAudioEncoder": "ffmpeg_pcm_s24le",
-        "RecTracks": 1,
+        "RecTracks": 7,          # bitmask: tracks 1 (mic) + 2 (camera) + 3 (raw mic)
         "RecUseRescale": "false",
     },
     "Audio": {"SampleRate": 48000, "ChannelSetup": "Stereo"},
@@ -105,13 +109,62 @@ SOURCE_PRESETS = {
     "Elgato HD60 X": "AVCaptureSessionPreset3840x2160",
 }
 
-AUDIO_SOURCE_DEVICE = "Elgato Wave Link Stream Mix"   # resolved by name
+# OBS source name -> (CoreAudio device name, recording track number).
+#
+# Devices are resolved BY NAME at apply time; the track number becomes the
+# source's `mixers` bitmask, and the union becomes AdvOut.RecTracks.
+#
+# NOTE: the source NAMED "Wave XLR" is not the Wave XLR. It captures Wave
+# Link's Stream Mix, i.e. the mic AFTER Wave Link's processing. The name is the
+# mic on the desk; the device is the mix. Do not "fix" it to the literal Wave
+# XLR interface -- that bypasses Wave Link and loses every filter.
+#
+# "Cam Audio" is the ZV-1's own mic, arriving embedded in the same HDMI stream
+# as the video and over the same Cam Link USB device, so it carries the video
+# path's latency. It is not program audio and never ships: it exists so that
+# ./sync.py can measure how far the Wave XLR drifts from the picture. Track 2
+# costs ~2.3 Mbps next to 98 Mbps of video, so it stays on permanently as a
+# check rather than being wired up only when sync is already suspect.
+# "Wave XLR Raw" is the literal interface, ahead of Wave Link entirely. The
+# warning above still stands for the PROGRAM source -- pointing track 1 at the
+# interface would lose every filter -- but as a third, non-shipping track it is
+# the same microphone recorded twice, once processed and once not, which is the
+# only way to see what the processing does:
+#
+#   * Voice Focus suppresses claps as non-voice, so a clapperboard is invisible
+#     on track 1. It survives on track 3, so the picture can be calibrated
+#     against a real transient WITHOUT turning the processing off.
+#   * Track 3 against track 1 is the same signal through two paths differing
+#     only by Wave Link, which measures the processing's true latency.
+#   * Track 3 against track 2 is two unprocessed mics, so it measures the
+#     capture path with no gate or suppression reshaping either envelope.
+AUDIO_SOURCES = {
+    "Wave XLR":     ("Elgato Wave Link Stream Mix", 1),
+    "Cam Audio":    ("Cam Link 4K",                 2),
+    "Wave XLR Raw": ("Elgato Wave XLR",             3),
+}
+PROGRAM_AUDIO_SOURCE = "Wave XLR"
 
-# NOTE: the OBS source carrying this device is NAMED "Wave XLR", which is not
-# what it is. It captures Wave Link's Stream Mix, i.e. the mic AFTER Wave Link's
-# processing. The name is the mic on the desk; the device is the mix. apply.py
-# matches on source id, not name, so the label is free to say whatever is
-# convenient -- but do not "fix" the device to the literal Wave XLR interface.
+# Scenes that carry the audio items. An audio source is live only in the scenes
+# containing it; Thumb is silent on purpose.
+AUDIO_ITEM_SCENES = ("Desktop", "BigHead")
+
+# How far the Wave XLR audio must be DELAYED to line up with the picture, in
+# milliseconds. Measure with ./sync.py, then record the answer here so it
+# survives an apply. 0 means unmeasured, not "verified as zero".
+#
+# Positive: the mic runs ahead of the picture -> delay the mic, via the source's
+# own sync offset. Negative: the mic runs behind, which a mic delay cannot undo,
+# so the CAMERA is delayed by the same amount instead with a Video Delay (Async)
+# filter. One constant, two mechanisms, because only one of them can fix a
+# given sign.
+SYNC_OFFSET_MS = 0
+
+# The camera source that a negative SYNC_OFFSET_MS delays. Only the ZV-1 path is
+# measured by ./sync.py -- the HD60 X is a different device with its own
+# latency, and correcting it would need its own reference.
+CAMERA_SOURCE   = "Sony ZV1"
+DELAY_FILTER_ID = "async_delay_filter"
 
 # Scenes inside the collection. COLLECTION_NAME above is the collection (the
 # file it names); these are the scenes within it.
@@ -161,6 +214,61 @@ def resolve_audio_uid(name):
                 if nxt and not nxt.startswith(name):
                     return nxt
     return None
+
+# ---------------------------------------------------------------- builders
+
+# OBS fills in every one of these keys itself on save; writing them here means
+# the collection we produce is loadable as-is rather than only after OBS has
+# rewritten it once.
+def new_audio_source(name, device_uid, track):
+    return {
+        "prev_ver": 537001986, "name": name, "uuid": str(uuid.uuid4()),
+        "id": "coreaudio_input_capture", "versioned_id": "coreaudio_input_capture",
+        "settings": {"device_id": device_uid},
+        "mixers": 1 << (track - 1), "sync": 0, "flags": 0,
+        "volume": 1.0, "balance": 0.5, "enabled": True, "muted": False,
+        "push-to-mute": False, "push-to-mute-delay": 0,
+        "push-to-talk": False, "push-to-talk-delay": 0,
+        "hotkeys": {"libobs.mute": [], "libobs.unmute": [],
+                    "libobs.push-to-mute": [], "libobs.push-to-talk": []},
+        "deinterlace_mode": 0, "deinterlace_field_order": 0,
+        "monitoring_type": 0, "private_settings": {},
+    }
+
+
+def new_audio_item(name, source_uuid, item_id):
+    """An audio scene item. It has no picture, so the geometry is all inert --
+    it is copied from the existing Wave XLR item so the two are indistinguishable
+    to OBS."""
+    return {
+        "name": name, "source_uuid": source_uuid,
+        "visible": True, "locked": False, "rot": 0.0,
+        "scale_ref": {"x": float(CANVAS_W), "y": float(CANVAS_H)},
+        "align": 5, "bounds_type": 0, "bounds_align": 0, "bounds_crop": False,
+        "crop_left": 0, "crop_top": 0, "crop_right": 0, "crop_bottom": 0,
+        "id": item_id, "group_item_backup": False,
+        "pos": {"x": 0.0, "y": 0.0},
+        "pos_rel": {"x": -(CANVAS_W / CANVAS_H), "y": -1.0},
+        "scale": {"x": 1.0, "y": 1.0}, "scale_rel": {"x": 1.0, "y": 1.0},
+        "bounds": {"x": 0.0, "y": 0.0}, "bounds_rel": {"x": 0.0, "y": 0.0},
+        "scale_filter": "disable", "blend_method": "default", "blend_type": "normal",
+        "show_transition": {"duration": 300}, "hide_transition": {"duration": 300},
+        "private_settings": {},
+    }
+
+
+def new_delay_filter(delay_ms):
+    return {
+        "prev_ver": 537001986, "name": "Video Delay (Async)", "uuid": str(uuid.uuid4()),
+        "id": DELAY_FILTER_ID, "versioned_id": DELAY_FILTER_ID,
+        "settings": {"delay_ms": delay_ms},
+        "mixers": 0, "sync": 0, "flags": 0, "volume": 1.0, "balance": 0.5,
+        "enabled": True, "muted": False,
+        "push-to-mute": False, "push-to-mute-delay": 0,
+        "push-to-talk": False, "push-to-talk-delay": 0,
+        "hotkeys": {}, "deinterlace_mode": 0, "deinterlace_field_order": 0,
+        "monitoring_type": 0, "private_settings": {},
+    }
 
 # ---------------------------------------------------------------- profile
 
@@ -217,16 +325,117 @@ def check_layout(d):
                  % (missing or "none", extra or "none"))
 
 
+def ensure_audio_sources(d, uids):
+    """Create any missing audio source, and hold every one to its device and
+    its track. `mixers` is a bitmask of recording tracks, so track 2 is 0b10 --
+    the two sources must not overlap or each track would carry both."""
+    by_name = {s["name"]: s for s in d["sources"]}
+    for src_name, (dev, track) in AUDIO_SOURCES.items():
+        want_mixers = 1 << (track - 1)
+        s = by_name.get(src_name)
+        if s is None:
+            note("source %r (%s) -> created on track %d" % (src_name, dev, track))
+            if WRITE:
+                d["sources"].append(new_audio_source(src_name, uids[src_name], track))
+            continue
+        if s.get("id") != "coreaudio_input_capture":
+            sys.exit("source %r is a %s, but AUDIO_SOURCES expects an audio input."
+                     % (src_name, s.get("id")))
+        st = s.setdefault("settings", {})
+        if st.get("device_id") != uids[src_name]:
+            note("source %r device -> %s" % (src_name, dev))
+            if WRITE:
+                st["device_id"] = uids[src_name]
+        if s.get("mixers") != want_mixers:
+            note("source %r tracks: %s -> %d (track %d only)"
+                 % (src_name, bin(s.get("mixers", 0)), want_mixers, track))
+            if WRITE:
+                s["mixers"] = want_mixers
+
+
+def ensure_audio_items(d):
+    """Put every audio source into every scene that should have sound.
+
+    An audio source is live only in the scenes containing it -- this is the same
+    trap that made BigHead record silence. A reference track that is missing from
+    the scene you actually recorded is worse than no reference track, because the
+    file still has two tracks and only one of them has anything on it.
+    """
+    uuid_of = {s["name"]: s.get("uuid") for s in d["sources"]}
+    for s in d["sources"]:
+        if s.get("id") != "scene" or s["name"] not in AUDIO_ITEM_SCENES:
+            continue
+        items = s.setdefault("settings", {}).setdefault("items", [])
+        have  = {it.get("name") for it in items}
+        for src_name in AUDIO_SOURCES:
+            if src_name in have:
+                continue
+            note("scene %s: add audio item %r" % (s["name"], src_name))
+            if WRITE:
+                next_id = max([it.get("id", 0) for it in items] or [0]) + 1
+                items.append(new_audio_item(src_name, uuid_of[src_name], next_id))
+
+
+def apply_sync_offset(d):
+    """Realise SYNC_OFFSET_MS, whichever direction it points.
+
+    A source's `sync` field is nanoseconds and can only ever hold audio BACK, so
+    it fixes a mic that runs ahead of the picture. A mic running behind needs the
+    opposite, which means delaying the camera instead. Both are driven from the
+    one constant, and each run clears the mechanism it is not using so that
+    flipping the sign cannot leave a stale correction behind.
+    """
+    by_name = {s["name"]: s for s in d["sources"]}
+
+    mic = by_name.get(PROGRAM_AUDIO_SOURCE)
+    want_ns = max(SYNC_OFFSET_MS, 0) * 1_000_000
+    if mic is not None and mic.get("sync") != want_ns:
+        note("source %r sync offset: %+.0f -> %+.0f ms"
+             % (PROGRAM_AUDIO_SOURCE, mic.get("sync", 0) / 1e6, want_ns / 1e6))
+        if WRITE:
+            mic["sync"] = want_ns
+
+    cam = by_name.get(CAMERA_SOURCE)
+    if cam is None:
+        return
+    filters   = cam.setdefault("filters", [])
+    want_ms   = max(-SYNC_OFFSET_MS, 0)
+    existing  = [f for f in filters if f.get("id") == DELAY_FILTER_ID]
+    if want_ms == 0:
+        for f in existing:
+            note("source %r: remove %s (%s ms)"
+                 % (CAMERA_SOURCE, f["name"], f.get("settings", {}).get("delay_ms")))
+            if WRITE:
+                filters.remove(f)
+    elif not existing:
+        note("source %r: add Video Delay (Async) %d ms" % (CAMERA_SOURCE, want_ms))
+        if WRITE:
+            filters.append(new_delay_filter(want_ms))
+    else:
+        f = existing[0]
+        if f.get("settings", {}).get("delay_ms") != want_ms:
+            note("source %r: video delay %s -> %d ms"
+                 % (CAMERA_SOURCE, f.get("settings", {}).get("delay_ms"), want_ms))
+            if WRITE:
+                f.setdefault("settings", {})["delay_ms"] = want_ms
+
+
 def patch_scene():
     print("\n[scene] %s" % os.path.basename(SCENE))
     d = json.load(open(SCENE))
     check_layout(d)
 
-    uid = resolve_audio_uid(AUDIO_SOURCE_DEVICE)
-    if not uid:
-        print("  !! could not resolve %r - is Wave Link running?" % AUDIO_SOURCE_DEVICE)
-        return None
-    print("  resolved %s -> %s" % (AUDIO_SOURCE_DEVICE, uid))
+    uids = {}
+    for src_name, (dev, _track) in AUDIO_SOURCES.items():
+        uid = resolve_audio_uid(dev)
+        if not uid:
+            print("  !! could not resolve %r for source %r" % (dev, src_name))
+            print("     (Wave Link running? Cam Link plugged in and fed a signal?)")
+            return None
+        print("  resolved %s -> %s" % (dev, uid))
+        uids[src_name] = uid
+
+    ensure_audio_sources(d, uids)
 
     rescale = {}          # source name -> (old_w/new_w, new_w)
     for s in d.get("sources", []):
@@ -242,11 +451,12 @@ def patch_scene():
                 if WRITE:
                     st["preset"] = want
 
-        if s.get("id") == "coreaudio_input_capture":
-            if st.get("device_id") != uid:
-                note("source %r device -> %s" % (s["name"], AUDIO_SOURCE_DEVICE))
-                if WRITE:
-                    st["device_id"] = uid
+        if s.get("id") == "coreaudio_input_capture" and s["name"] not in AUDIO_SOURCES:
+            sys.exit("unknown audio source %r (device %s).\n"
+                     "Audio is matched by NAME because two sources now share the\n"
+                     "coreaudio type. Add it to AUDIO_SOURCES in apply.py with the\n"
+                     "track it belongs on, or delete it in OBS."
+                     % (s["name"], st.get("device_id")))
 
         if s.get("id") in UNMANAGED_SOURCE_IDS:
             f = st.get("file")
@@ -258,12 +468,22 @@ def patch_scene():
             if WRITE:
                 s["monitoring_type"] = 0
 
-    # global Mic/Aux: currently 'default' (= HD60 X) and duplicating the mic path
-    if "AuxAudioDevice1" in d:
-        note("global Mic/Aux (device_id=%r) -> removed"
-             % d["AuxAudioDevice1"].get("settings", {}).get("device_id"))
-        if WRITE:
-            del d["AuxAudioDevice1"]
+    ensure_audio_items(d)
+    apply_sync_offset(d)
+
+    # The global audio slots stay empty. AuxAudioDevice1 held 'default' (= the
+    # HD60 X): a second live audio path, and the cause of the launch hang. All
+    # six are checked, not just the one that was populated -- OBS offers them in
+    # the same settings pane, so the next one to get filled in by accident would
+    # be a different key with the identical failure.
+    for slot in ("DesktopAudioDevice1", "DesktopAudioDevice2",
+                 "AuxAudioDevice1", "AuxAudioDevice2",
+                 "AuxAudioDevice3", "AuxAudioDevice4"):
+        if slot in d:
+            note("global audio slot %s (device_id=%r) -> removed"
+                 % (slot, d[slot].get("settings", {}).get("device_id")))
+            if WRITE:
+                del d[slot]
 
     # preserve on-screen size for items whose source resolution changed
     for s in d.get("sources", []):

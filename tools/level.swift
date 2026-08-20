@@ -1,8 +1,14 @@
-// Measure what is actually ON a recording's audio track.
+// Measure what is actually ON a recording's audio tracks.
 //
 // probe reports the audio FORMAT, which a fully silent track satisfies just as
 // well as a good one. This decodes the samples and reports peak/RMS per channel,
 // so "did this scene actually capture sound" has a real answer.
+//
+// EVERY track is reported, not just the first. Recordings carry three: track 1
+// is the Wave XLR through Wave Link, track 2 the camera's own mic, and track 3
+// the Wave XLR interface direct. The last two are sync references for sync.py.
+// Reporting only track 1 would hide exactly the failure that makes a sync
+// measurement impossible -- a reference track that recorded nothing.
 import AVFoundation
 import Foundation
 
@@ -22,10 +28,18 @@ let sem = DispatchSemaphore(value: 0)
 Task {
     do {
         let tracks = try await asset.loadTracks(withMediaType: .audio)
-        guard let track = tracks.first else {
+        guard !tracks.isEmpty else {
             print("no audio track"); exit(1)
         }
 
+        print("file:   \((path as NSString).lastPathComponent)")
+        print("tracks: \(tracks.count)")
+        var anySignal = false
+        var anySilent = false
+
+        // One reader per track. AVAssetReader is single-use and a shared one would
+        // interleave the tracks' sample buffers, so each gets its own pass.
+        for (idx, track) in tracks.enumerated() {
         let reader = try AVAssetReader(asset: asset)
         // Decode to canonical float so peak/RMS are independent of source bit depth.
         let out = AVAssetReaderTrackOutput(track: track, outputSettings: [
@@ -67,16 +81,35 @@ Task {
             }
         }
 
-        print("file:   \((path as NSString).lastPathComponent)")
-        print("frames: \(n)  channels: \(chans)")
-        guard n > 0 else { print("\nNO SAMPLES DECODED"); exit(1) }
-        print("\n        peak dBFS   RMS dBFS")
+        print("\ntrack \(idx + 1):  \(n) frames, \(chans) channels")
+        guard n > 0 else {
+            print("  NO SAMPLES DECODED")
+            anySilent = true
+            continue
+        }
+        print("          peak dBFS   RMS dBFS")
         for c in 0..<chans {
-            print("  ch\(c)   \(dbfs(peak[c]))      \(dbfs((sumsq[c] / Double(n)).squareRoot()))")
+            print("    ch\(c)   \(dbfs(peak[c]))      \(dbfs((sumsq[c] / Double(n)).squareRoot()))")
         }
         let loudest = peak.max() ?? 0
-        print("\n\(loudest <= 0.0000001 ? "SILENT — no signal on any channel" : "signal present")")
-        exit(0)
+        if loudest <= 0.0000001 {
+            print("    SILENT — no signal on any channel")
+            anySilent = true
+        } else {
+            anySignal = true
+        }
+        }
+
+        print("")
+        if !anySignal {
+            print("SILENT — no signal on any track")
+            exit(1)
+        }
+        // A silent track among live ones is the interesting case: the take is not
+        // obviously broken, but something that was meant to record did not.
+        print(anySilent ? "signal present, but at least one track is SILENT"
+                        : "signal present on all \(tracks.count) track(s)")
+        exit(anySilent ? 1 : 0)
     } catch {
         FileHandle.standardError.write("error: \(error)\n".data(using: .utf8)!)
         exit(1)

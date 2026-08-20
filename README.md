@@ -69,8 +69,8 @@ Three scenes:
 
 | Scene | Contains | Role |
 |---|---|---|
-| `Desktop` | `Wave XLR`, `HDX 60` full-frame, `Sony ZV1` PiP flush right | The working scene |
-| `BigHead` | `Wave XLR`, `Sony ZV1` full-frame | Talking head, camera only |
+| `Desktop` | `Wave XLR`, `Cam Audio`, `HDX 60` full-frame, `Sony ZV1` PiP flush right | The working scene |
+| `BigHead` | `Wave XLR`, `Cam Audio`, `Sony ZV1` full-frame | Talking head, camera only |
 | `Thumb` | `Image` | Thumbnail still, no audio |
 
 `Sony ZV1` and `Wave XLR` are the **same sources** shared between `Desktop` and
@@ -81,7 +81,8 @@ capture referenced twice. Change a source's settings and both scenes follow.
 is live only in the scenes containing it, and the global Mic/Aux slot is
 deliberately empty (it was a second live audio path and the cause of the launch
 hang). `Thumb` is silent on purpose; `BigHead` was silent by accident until its
-`Wave XLR` item was added.
+`Wave XLR` item was added. `Cam Audio` is in both sounding scenes for the same
+reason — see [A/V sync](#av-sync).
 
 Two things this costs apply.py:
 
@@ -117,14 +118,21 @@ type, not name, so the label is free to say whatever is convenient.
 - `bin/probe <file.mov>` — what a finished recording actually contains:
   resolution, frame rate, codec, color tags, audio format, effective bitrate.
   The real check that config intent survived to disk.
-- `bin/level <file.mov>` — decodes the audio track and reports peak/RMS dBFS per
-  channel. `probe` only reports the audio *format*, which a completely silent
-  track satisfies just as well as a good one. This answers "did that scene
+- `bin/level <file.mov>` — decodes **every** audio track and reports peak/RMS
+  dBFS per channel. `probe` only reports the audio *format*, which a completely
+  silent track satisfies just as well as a good one. This answers "did that scene
   actually capture sound", and comparing RMS against a known-good take confirms
-  it came through the same path.
+  it came through the same path. It exits non-zero if any track is silent, which
+  is the quickest check that a take is measurable — a two-track file whose track
+  2 recorded nothing looks fine to `probe`.
+
+- `sync.py [file]` — measures how far the Wave XLR audio has drifted from the
+  picture, using the camera's own mic on track 2 as the reference. See
+  [A/V sync](#av-sync).
 
 - `normalize.py [file]` — lifts a finished recording to YouTube's loudness
-  target. Defaults to the newest recording in `~/Movies`. See
+  target. Defaults to the newest recording in `~/Movies`, and emits a single
+  audio track (`-t` to choose which; track 1, the Wave XLR, by default). See
   [Normalizing for YouTube](#normalizing-for-youtube).
 
 None need camera permission; enumerating formats does not open a session.
@@ -189,8 +197,10 @@ Five deliberate design choices:
   hardcoded, and the names are checked against `PROFILE_NAME` /
   `COLLECTION_NAME`. Patching a collection OBS is not actually using would look
   like it worked while changing nothing.
-- **Matches sources by type, not by name.** Renaming a source in OBS is free.
-  Renaming a *scene* is not, and apply.py stops rather than guess.
+- **Matches sources by type, not by name.** Renaming a *scene* is not, and apply.py stops rather than guess. **Audio is
+  the exception**: there are two `coreaudio_input_capture` sources now, so the
+  type no longer identifies them and `AUDIO_SOURCES` is keyed on the source
+  name. An audio source apply.py does not recognise is an error, not a guess.
 - **Only touches scene-item scale when a capture resolution actually changes**,
   so re-running is idempotent rather than halving the PiP each time, and your
   manual layout tweaks survive.
@@ -217,7 +227,7 @@ A 13 s test recording, read back with `bin/probe`:
     VIDEO  3840x2160  29.970 fps  codec hvc1
            ColorPrimaries / TransferFunction / YCbCrMatrix: ITU_R_709_2
            FullRangeVideo: 0
-    AUDIO  lpcm  48000 Hz  2 ch  24-bit
+    AUDIO  lpcm  48000 Hz  2 ch  24-bit  (x2 tracks)
     153.6 MB / 13.08 s  ->  98.5 Mbps overall
 
 Every intent survived to disk: native 4K, 29.97 to match the ZV-1, HEVC
@@ -268,11 +278,299 @@ the preamp ahead of the converter; a digital fader after the A/D only makes an
 already-clipped signal quieter. That the peak moved with the knob is the proof
 the ceiling was analog. Clipguard is a backstop, not a substitute.
 
+## A/V sync
+
+    ./sync.py                 # newest recording in ~/Movies
+    ./sync.py --self-test     # prove the sign convention before trusting a number
+    ./sync.py <file> --cam-cm 150 --mic-cm 25
+
+Every recording carries **three** audio tracks:
+
+| Track | Source | Device | Ships? |
+|---|---|---|---|
+| 1 | `Wave XLR` | Wave Link Stream Mix | yes — this is the audio |
+| 2 | `Cam Audio` | Cam Link 4K | no — sync reference only |
+| 3 | `Wave XLR Raw` | Elgato Wave XLR | no — the same mic, unprocessed |
+
+Tracks 2 and 3 cost about 2.3 Mbps each next to 98 Mbps of video, so they stay
+on permanently as a check rather than being wired up once sync is already
+suspect. macOS lets OBS open the Wave XLR interface while Wave Link is holding
+it, so track 3 is free in every sense that matters.
+
+### Why a second track can answer this
+
+Track 2 is the ZV-1's own on-camera mic. That audio is embedded in the **same
+HDMI stream as the video** and arrives over the **same Cam Link USB device**, so
+it carries the video path's latency — track 2 is a stand-in for when the picture
+lands. Track 1 comes from a completely separate device on a separate clock.
+
+Both mics heard the same room, so the delta between the two tracks is the delta
+between the two paths, which is the amount the good audio misses the picture by.
+That makes the offset a measurement rather than a guess. Nudging audio in an
+editor until it "looks right" lands somewhere inside the ±45 ms window where
+people stop noticing, not on zero.
+
+`sync.py` correlates the two tracks' **loudness contours**, not their waveforms —
+two mics metres apart through different preamps produce waveforms with no
+resemblance to each other and loudness contours that match closely.
+
+It does this **two ways and requires them to agree**:
+
+- **Envelope** — block RMS. Follows loudness directly.
+- **Onset** — rising edges of the *log* envelope, half-wave rectified. Follows
+  when energy arrives rather than how much, so it is gain-independent.
+
+The second exists because Wave Link's compressor, gate and Clipguard reshape
+track 1's loudness and leave track 2 untouched, so the two tracks' envelopes
+genuinely differ in shape even when perfectly aligned. Onset strength largely
+survives compression; it is also sparse, and can lock onto the wrong syllable.
+They are wrong in unrelated ways, so agreement between them means something.
+
+Windows more than 5 ms from what their method **predicts for that point in the
+take** are discarded before the spread is judged. The onset method will
+occasionally lock onto the wrong syllable — one wrong window, not a wrong take —
+and max-minus-min lets a single straggler veto four that agree. A real take was
+rejected this way: both methods had agreed on −16.1 ms to within 0.1 ms, and one
+onset window at −26.4 failed the whole measurement. Discarded windows print with
+a `*`.
+
+The prediction is a **fitted line**, not the median, whenever a take is long
+enough for one to be justified. On a take that drifts, the end windows genuinely
+disagree with the median, because that is what drift is; judging them against it
+throws out both ends of every long take and then reports the survivors as a huge
+disagreement. A ten minute take of this rig drifts about 40 ms end to end, which
+the median test would have called four bad windows and a broken take.
+
+The line is seeded with a **median of pairwise slopes** before least squares gets
+near it. One window hundreds of milliseconds out tilts a least-squares line far
+enough that the rejection step then discards the good windows and keeps the bad
+one; moving a median of pairwise slopes takes a majority of the pairs.
+
+**Agreement is the only quality test, and that is an empirical finding.** Per
+window correlation scores do not separate a good take from a bad one — a
+near-silent clap take scored 2.0–3.4 sigma of peak prominence while good takes
+scored 2.0–3.8. Any threshold that passed the good ones passed the bad one. What
+separated them was windows agreeing with each other, and methods agreeing with
+each other.
+
+### What the third track settles
+
+Track 3 is the Wave XLR interface directly, ahead of Wave Link entirely. It is
+the **same microphone recorded twice**, once processed and once not, which is the
+only way to see what the processing does rather than infer it:
+
+- **Track 3 against track 2** is two unprocessed mics, so neither envelope has
+  been reshaped by a gate or a compressor. It is the clean version of the
+  measurement track 1 can only approximate.
+- **Track 3 against track 1** is one signal through two paths differing only by
+  Wave Link, which measures the processing's true latency. Because it is
+  literally the same waveform, this pair can be correlated at the **sample**
+  level rather than on envelopes, so it resolves 0.02 ms instead of 1 ms.
+- **Track 3 against the picture** works with a clapperboard. Voice Focus
+  suppresses claps as non-voice, so a clap is nearly invisible on track 1; it
+  survives on track 3, which makes frame calibration possible **without** turning
+  the processing off and changing the thing being measured.
+
+It was added to settle a specific confound. Across six takes, heavier
+suppression correlated with a 10–15 ms more negative offset, and there are two
+mechanisms that would produce that: genuine lookahead latency, which should be
+corrected, and an envelope artefact, which should not. A gate does not move audio
+in time; it truncates each phrase's decay while the unprocessed track keeps its
+tail, and lookahead opens it slightly before the sound. Both shift the measured
+envelope earlier while shifting nothing audible. They could not be separated
+because both scale with the same setting.
+
+The answer, once the clean pairing existed, is that **most of that spread was
+drift** (below) rather than either mechanism: the six numbers were single
+measurements taken at different points in takes of different lengths, on a path
+that slides 3.9 ms per minute. Wave Link's own contribution measures **+129 ms**
+of latency, stable to a millisecond within a take.
+
+### Using it
+
+1. Record **60+ seconds of continuous speech**, in view of the camera. A few
+   claps on top make the peak sharper, but claps *alone* do not work — the
+   envelope is flat between them, and flat is what there is nothing to correlate.
+2. `./bin/level <file>` — confirm `tracks: 3`, all with signal, and track 1
+   somewhere near the usual −30 dBFS RMS. A silent or very quiet track is
+   unmeasurable and `probe` will not notice. `normalize.py` runs this for you
+   before it does anything else, so this step is only for looking at the numbers
+   yourself.
+3. `./sync.py` — read the offset, and the drift if the take is long enough.
+
+Step 4 is usually nothing: **`normalize.py` measures each take itself** and
+applies the answer. `sync.py` is for looking at the measurement, not for
+feeding a constant to anything.
+
+`sync.py` refuses rather than guesses. It stops if either track is below
+−55 dBFS RMS, and it stops if the per-window results disagree by more than
+10 ms — the offset being corrected is itself only tens of ms, so a spread that
+size is not a measurement with noise on it, it is noise. Both failures print
+what to change about the take.
+
+Measure the distances and pass `--cam-cm` / `--mic-cm`. The camera is further
+from you than the desk mic, so it genuinely hears you later, and at **34 cm per
+millisecond** a camera 1.5 m out and a mic at 25 cm is 3.6 ms of pure acoustics
+that is not the rig's fault. Without the flags that distance is silently
+attributed to the capture chain.
+
+### The offset is per-take, not per-rig
+
+Four measurements of this setup:
+
+| take | Wave Link processing | offset |
+|---|---|---|
+| 87 s | on | −22.0 ms |
+| 17 s | on | −33.2 ms |
+| 63 s | **off** | **−54.2 ms** |
+
+The first two differ by 11 ms with nothing changed between them: the USB buffers
+align differently each time OBS starts the sources, so the offset belongs to the
+**capture session**, not the rig. A pinned constant is tuned to whichever take
+happened to be measured and is wrong by up to ~10 ms on all the others.
+
+The third is a controlled check. Wave Link's compressor and Clipguard have
+lookahead, which is real latency in the mic path — switching the processing off
+should make the mic arrive *earlier* relative to the picture, and it moved
+20–30 ms in exactly that direction. The tool predicted a change it was not told
+about, which is the best evidence available that it measures something physical.
+
+Since every take carries its own reference track, there is nothing to guess:
+**`normalize.py` measures the take it is normalizing.**
+
+### There are two faults, not one
+
+The offset above is a **constant**. It is not the whole problem, and no
+measurement of it however careful can be, because the two devices also run at
+slightly different **rates**:
+
+| pairing | offset | drift |
+|---|---|---|
+| track 1 (Wave Link) vs track 2 (camera) | −17.9 ms at t=0 | **+66 ppm** |
+| track 3 (Wave XLR direct) vs track 2 | −143.5 ms | none detectable |
+| track 3 vs track 1, at sample level | +125.8 ms at t=0 | **+62 ppm** |
+
+Read across a 99 s take, track 1 slid from −16.8 ms to −12.1 ms in a straight
+line, residual 0.34 ms rms. The raw path shows no slope at all. **The drift lives
+entirely in Wave Link's virtual device**, and the three pairings close as a
+triangle to 0.1 ms, which is the check that none of these numbers is an artefact
+of one measurement.
+
+62 ppm is **3.9 ms per minute**, about 40 ms across a ten minute take. That is
+ordinary: consumer audio clocks are specified to ±50 or ±100 ppm and nothing here
+word-locks them. It is **not** the 29.97-vs-30 pulldown ratio, which is 1000 ppm
+and would slip a full second every 17 minutes.
+
+What it means in practice is that a single constant, however well measured, is
+only right at one instant. Correcting only the constant *centres* the error
+instead of removing it, leaving roughly ±20 ms across a long take — which is near
+enough to the edge of perceptible to produce "it seems fine but I cannot quite
+tell". `normalize.py` corrects the **rate as well**, by resampling, and then
+re-measures the constant on the corrected audio.
+
+A ten minute take, corrected both ways, holds to about a millisecond. The 99 s
+take above went from −14.7 ms with a 4.7 ms slope to **+0.08 ms with no slope
+detectable**, measured on the finished file against the camera reference.
+
+### Where the correction is applied
+
+`SYNC_OFFSET_MS` means *how far the Wave XLR must be delayed to line up with the
+picture*. Two places can apply it, and **only one of them may be non-zero** —
+both would correct twice, producing a doubled error that looks exactly like the
+problem the tools would then be asked to fix again. normalize.py reads apply.py's
+value at startup and refuses to run if both are set.
+
+**normalize.py — the default, `"auto"`.** Measures the take, then applies a
+post-processing shift after loudnorm so the loudness correction is still computed
+on the audio as recorded. The raw take keeps whatever the rig actually did, a
+wrong value costs a re-run rather than a re-shoot, and the live and monitoring
+paths are untouched. Positive delays the audio with prepended silence; negative
+advances it, which has to discard that much from the head of the track since
+there is nothing before the start to move forward into.
+
+`-s <ms>` pins a value for one run and `-s 0` disables the correction. **A pinned
+value is only valid for the signal path it was measured on** — Wave Link's
+processing latency is part of the mic path, so a number measured with the
+processing off is wrong by 20–30 ms for a take recorded with it on. `"auto"` has
+no such problem: it re-measures from the take's own two tracks, so whatever Wave
+Link was doing during that recording is already in the answer. If a
+measurement fails, normalize **refuses** rather than quietly shipping an
+uncorrected file — that is indistinguishable from a correct one until someone
+watches it. Takes recorded before the reference track existed have one track and
+must use `-s`.
+
+**apply.py — the OBS-side fix, currently 0.** Corrects at the source, so the raw
+files are right too, at the cost of being baked into every take. It needs two
+mechanisms because only one can fix a given sign: positive uses the `Wave XLR`
+source's own sync offset to hold the mic back; negative delays the camera with a
+Video Delay (Async) filter on `Sony ZV1`, since a sync offset cannot pull audio
+*earlier*. Each run clears the mechanism it is not using, so flipping the sign
+cannot leave a stale correction behind.
+
+### What this does not cover
+
+- **Only the ZV-1 path is measured.** The HD60 X is a different device with its
+  own latency, and a negative offset delays the camera only. If the screen
+  capture also drifts, that needs its own reference.
+- **Drift is corrected on takes long enough to measure it.** Below about a
+  minute of baseline a slope cannot be told from scatter, so `normalize.py`
+  applies the constant alone and says so. That is the right answer for a short
+  take, where 3.9 ms per minute has nowhere to accumulate, but it means a
+  *marginal* take gets no rate correction rather than a guessed one.
+- **The drift is measured per take, not pinned.** It probably is a hardware
+  constant — a ratio between two crystals rather than however the USB buffers
+  happened to line up — but "probably" is not measured, and one take pinned from
+  another would be corrected wrongly and silently. It has been measured on
+  exactly one take so far.
+- **Old recordings cannot be measured after the fact** — they have one track.
+- **Track 2 stands in for the video, and that is an assumption.** The camera mic
+  shares one HDMI stream and one USB cable with the picture, but inside OBS they
+  are two separate sources — video through AVFoundation, audio through CoreAudio
+  — with independent timestamps. If those two software paths differ, the number
+  is off by that difference. A clapperboard against the actual frames is the only
+  ground truth; at 29.97 fps one frame is 33 ms, so it confirms sign and rough
+  magnitude rather than the last few ms.
+
+### Verifying the sign
+
+    ./sync.py --self-test
+
+Builds a file with a 40 ms delay put in on purpose and checks the tool reports
++40. A cross-correlation lag is the easiest thing here to get backwards, and a
+backwards answer is a plausible-looking number of the right magnitude that makes
+sync *worse*. Run it once before trusting a real measurement.
+
+It then builds a second file whose **clocks** differ by a known amount and checks
+the reported ppm. A drift has the same sign hazard plus one more: ms-per-second
+and ppm are a factor of 1000 apart, and either reads as a plausible number. The
+test asserts against the stretch the file actually has, read back from its own
+track lengths, rather than the stretch ffmpeg was asked for — asetrate takes an
+integer rate and the resampler approximates the ratio, so the two differ by a few
+ppm, and asserting against the request would need a tolerance loose enough to
+hide a real error. It currently recovers a +291.8 ppm stretch as +291.6.
+
+Both conventions are stated in the output because they are mirror images of each
+other, and writing a test to the wrong one is a mistake this suite has already
+caught once: the offset test reads "track 2 relative to track 1", while the drift
+test reads "the mic track relative to the reference", and track 1 is the mic.
+
+`normalize.py` also checks its own work. It applies the rate correction to the
+audio alone, re-measures, and **refuses** if a slope is still detectable — a
+correction applied backwards leaves a take drifting twice as fast, and nothing
+downstream would notice. Feeding it a deliberately negated value produces:
+
+    normalize: the rate correction did not take: -64.5 ppm was measured, and
+    189.0 ppm is still detectable after correcting for it.
+
 ## Normalizing for YouTube
 
     ./normalize.py            # newest recording in ~/Movies
     ./normalize.py -n         # measure only, write nothing
     ./normalize.py <file>     # a specific take
+    ./normalize.py -t 2       # normalize the camera track instead
+    ./normalize.py -s 0       # this take only: no sync correction
+    ./normalize.py -d 0       # this take only: no rate correction
+    ./normalize.py --no-level # skip the source check (with -s 0 -d 0)
 
 Requires `brew install ffmpeg`. Output lands in `~/Movies/normalized/<name>.mp4`;
 the original is never touched, so re-running is free.
@@ -291,16 +589,46 @@ A real take, start to finish:
 
 Four choices worth knowing:
 
+- **The source is checked first, with `bin/level`.** Before any decoding work,
+  because it costs a second and the passes it guards cost minutes. A silent track
+  satisfies every format check there is — ffprobe reports the *format*, and
+  silence has the same one — and only reveals itself when a sync correction is
+  computed against it, which produces a confident number from nothing. If any
+  track recorded nothing, normalize prints the per-track levels and refuses.
+  `--no-level` skips it, which is only sensible together with `-s 0 -d 0`.
+  Requires `make` to have been run, since `bin/` is not tracked.
 - **Two passes, not one.** Single-pass `loudnorm` is a *dynamic* normalizer that
   rides the level as it goes, which pumps audibly on speech. Pass 1 measures,
   pass 2 applies one fixed correction to the whole file.
+- **The sync corrections are applied here**, after loudnorm: the rate first,
+  then the constant. See
+  [Where the correction is applied](#where-the-correction-is-applied). The order
+  matters because the resample pivots at t=0 and therefore moves the constant
+  too, so the constant is re-measured on rate-corrected audio rather than derived
+  from the uncorrected measurement by arithmetic nobody can check.
+- **One audio track out.** The source has three; the upload gets track 1, the
+  Wave XLR, and the two reference tracks are dropped. The track is selected for the
+  *measurement* pass too — measuring one track and encoding another would apply
+  a correction computed from the wrong audio and still look like it worked.
 - **Video is copied, never re-encoded.** It is already 4K HEVC from the hardware
   encoder; a re-encode would cost quality and an hour to gain nothing. Only the
   audio is touched, PCM to AAC 384k at 48 kHz.
 - **A verify pass re-measures the output** and refuses the result if it missed
-  the target, because a silent or mangled audio track otherwise looks exactly
-  like a success. Both measurement passes decode audio only, so three passes
-  over a 4K take stay cheap.
+  the target — on loudness *and* on true peak. `linear=true` applies one fixed
+  gain and does not enforce the true-peak ceiling: when the gain a quiet take
+  needs would run the peaks over, they go over. A take measured +0.5 dBTP on the
+  way out while passing the loudness check. A silent or mangled audio track
+  otherwise looks exactly like a success. Both measurement passes decode audio
+  only, so three passes over a 4K take stay cheap.
+- **Verify also checks the output's audio and video are the same length.** Every
+  sync correction is a filter that moves audio in time, and a mistake in one
+  changes the track's *length* rather than its level, which every loudness check
+  here would pass without comment. This is not hypothetical: `loudnorm` outputs
+  **192 kHz**, four times the rig's rate, because that is what it upsamples to
+  for true-peak detection. `asetrate` does not resample, it relabels whatever
+  rate it is handed, so the first version of the rate correction reinterpreted
+  192 kHz audio as 48 kHz and wrote 394 s of audio against 98 s of video. The
+  loudness verify looked at it and complained only that it was 1.4 LU quiet.
 - **-1 dBTP, not 0.** AAC decodes in the frequency domain and can reconstruct
   samples slightly above the encoded peak; mastering to 0 clips on someone
   else's player rather than on this one.
@@ -324,6 +652,54 @@ gain knob a few dB rather than asking the limiter for more.
   audio source is live only in scenes containing it. Added the existing
   `Wave XLR` source (same `source_uuid`, not a second capture) and confirmed on
   disk at -30.3 dBFS RMS, within 0.3 dB of a known-good `Desktop` take.
+- ~~Confirm `hybrid_mov` writes two tracks~~ — **done**. A real take reads back
+  as `tracks: 2`, both PCM, both with signal. Now three, likewise confirmed.
+- ~~Can OBS open the Wave XLR while Wave Link holds it?~~ — **yes**. This was the
+  one unverified risk in adding track 3; macOS does not enforce exclusive access
+  here. A real take reads back with signal on all three tracks.
+- ~~Is the suppression-correlated offset real latency or a gate artefact?~~ —
+  **mostly neither**. With the unprocessed track available for comparison, the
+  spread across those six takes is dominated by a +62 ppm clock drift and by
+  where in each take the single measurement happened to be taken. Wave Link's
+  own latency is +129 ms and is stable within a take.
+- ~~Drift is unmeasured~~ — **measured and corrected**. +64.5 ppm on a 99 s take,
+  residual 0.34 ms rms about the fitted line. `normalize.py` now corrects the
+  rate as well as the constant, and the corrected output measures +0.08 ms
+  against the camera reference with no slope detectable.
+- ~~Measure the sync offset~~ — **superseded**: there is no single offset. It
+  varies per capture session (−22, −33, −54 ms), so normalize.py measures each
+  take. The shift itself is verified: normalizing with a 22 ms correction and
+  correlating the output against the raw read back −22.0 ms at r = 0.99.
+- **No measurement has been checked against actual frames.** Every number here
+  is measured against the camera's *audio*, which stands in for the picture but
+  is a separate OBS source with its own timestamps. A clapperboard take would
+  confirm it independently. At 29.97 fps one frame is 33 ms, so it settles the
+  sign and rough magnitude, not the last few ms — which is enough, since the
+  offsets seen so far span 22–54 ms.
+- **The Wave XLR is clipping, and it now blocks normalize.** Takes have peaked
+  at 0.0 dBFS (processing off) and −3.7 dBFS (on), against a −12 to −6 target.
+  A quiet take with no headroom needs so much gain that the true-peak ceiling
+  cannot be held, and the verify pass refuses those. Turn the analog gain knob
+  down; see "Set gain for headroom, not for level".
+- **Cross-take comparisons of the offset are confounded and should not be
+  trusted yet.** Five takes measured −22.0, −33.2, −54.2, −15.4 and −9.8 ms, but
+  Wave Link's settings moved between them. The recording's noise floor tracks the
+  **Voice Focus** amount — takes at maximum sit near −90 dBFS, reduced ones near
+  −70, processing off near −66 — and the offsets cluster by that setting. What
+  the clustering means is unclear: more processing should add latency and put the
+  mic *further behind*, and the data goes the other way. Either something else
+  changed too, or heavy Voice Focus reshapes the envelope enough to bias the
+  correlation. Resolving it needs takes that vary one setting at a time.
+  Per-take measurement is unaffected either way — each take is measured in the
+  state it was recorded in.
+- **Drift is still unmeasured, and there is a hint of it.** A 25 s take read
+  −13.1 ms in its first windows and −16.2 ms in its last. That is either the
+  capture settling after start or ~9 ms per minute of clock drift — over a
+  10 minute video the second would be ~90 ms, which matters. One long take tells
+  them apart; `sync.py` reports the slope above 120 s.
+- **Drift is still unknown.** The 87 s take is too short a baseline; `sync.py`
+  needs 120 s+ before it will report a slope. Real takes run ~10 minutes and the
+  two devices share no clock, so one 3–5 minute measurement take is worth doing.
 - **Input monitoring permission is still denied** (`[hotkeys-cocoa]: No event
   permissions, could not add global hotkeys`). This no longer blocks the Stream
   Deck, which drives OBS over its own plugin rather than hotkeys — it only
